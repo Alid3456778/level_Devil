@@ -1,0 +1,124 @@
+{
+  "id": 6,
+  "name": "UPSIDE DOWN",
+  "bgColor": "#0a0a1a",
+  "width": 1600,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 1600,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 1600,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 1568,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 300,
+      "y": 300,
+      "w": 160,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 700,
+      "y": 160,
+      "w": 160,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1100,
+      "y": 300,
+      "w": 160,
+      "h": 32,
+      "type": "solid"
+    }
+  ],
+  "traps": [
+    {
+      "type": "spike_up",
+      "x": 500,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 532,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 564,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_down",
+      "x": 900,
+      "y": 32,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_down",
+      "x": 932,
+      "y": 32,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_down",
+      "x": 964,
+      "y": 32,
+      "w": 32,
+      "h": 32
+    }
+  ],
+  "events": [
+    {
+      "trigger": "player_x",
+      "value": 600,
+      "triggered": false,
+      "action": "flip_gravity"
+    },
+    {
+      "trigger": "player_x",
+      "value": 1050,
+      "triggered": false,
+      "action": "unflip_gravity"
+    }
+  ],
+  "door": {
+    "x": 1520,
+    "y": 352
+  },
+  "key": null,
+  "gravity": 1
+}

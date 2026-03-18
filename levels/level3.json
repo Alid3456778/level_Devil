@@ -1,0 +1,30 @@
+{
+  "id": 3, "name": "NOW YOU SEE IT",
+  "bgColor": "#1a0d0d",
+  "width": 1600, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":0,   "w":1600, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1568, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":0,    "y":416, "w":300,  "h":64, "type":"solid" },
+    { "x":380,  "y":416, "w":300,  "h":64, "type":"solid" },
+    { "x":760,  "y":416, "w":300,  "h":64, "type":"solid" },
+    { "x":1140, "y":416, "w":428,  "h":64, "type":"solid" },
+    { "x":220,  "y":320, "w":120,  "h":32, "type":"crumble" },
+    { "x":620,  "y":250, "w":120,  "h":32, "type":"crumble" },
+    { "x":1000, "y":300, "w":120,  "h":32, "type":"crumble" },
+    { "x":480,  "y":350, "w":100,  "h":32, "type":"shrinking_wall" }
+  ],
+  "traps": [
+    { "type":"spike_up", "x":320, "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":352, "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":700, "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":732, "y":384, "w":32, "h":32 },
+    { "type":"expanding_spike", "x":900, "y":384, "w":16, "h":16, "maxScale":4 }
+  ],
+  "events": [],
+  "door": { "x":1520, "y":352 },
+  "key": null,
+  "gravity": 1
+}

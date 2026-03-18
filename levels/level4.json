@@ -1,0 +1,33 @@
+{
+  "id": 4, "name": "FIND THE KEY",
+  "bgColor": "#0a1a0d",
+  "width": 2000, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":2000, "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":2000, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1968, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":300,  "y":300, "w":160,  "h":32, "type":"solid" },
+    { "x":550,  "y":220, "w":120,  "h":32, "type":"solid" },
+    { "x":750,  "y":150, "w":120,  "h":32, "type":"solid" },
+    { "x":950,  "y":220, "w":120,  "h":32, "type":"solid" },
+    { "x":1150, "y":300, "w":160,  "h":32, "type":"solid" },
+    { "x":1600, "y":280, "w":160,  "h":32, "type":"moving_platform", "dx":2, "minX":1500, "maxX":1750, "dir":1 }
+  ],
+  "traps": [
+    { "type":"floor_hole", "x":240, "y":416, "w":64, "h":64, "state":"closed", "delay":0 },
+    { "type":"spike_moving_h", "x":450, "y":384, "w":32, "h":32, "dx":2, "minX":400, "maxX":600, "dir":1 },
+    { "type":"spike_up",  "x":870, "y":384, "w":32, "h":32 },
+    { "type":"spike_up",  "x":902, "y":384, "w":32, "h":32 },
+    { "type":"floor_hole","x":1050,"y":416, "w":96, "h":64, "state":"closed", "delay":2000 },
+    { "type":"boomerang_arrow", "x":1300, "y":350, "w":24, "h":12, "speed":5, "dir":1 }
+  ],
+  "events": [
+    { "trigger":"player_x", "value":220,  "triggered":false, "action":"open_hole", "trapIndex":0 },
+    { "trigger":"time",      "value":3000, "triggered":false, "action":"open_hole", "trapIndex":4 }
+  ],
+  "door": { "x":1900, "y":352, "locked":true },
+  "key": { "x":790, "y":118, "w":28, "h":28, "collected":false },
+  "gravity": 1
+}

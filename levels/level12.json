@@ -1,0 +1,175 @@
+{
+  "id": 12,
+  "name": "FIRE AND ICE",
+  "bgColor": "#1a0800",
+  "width": 2200,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 600,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 700,
+      "y": 416,
+      "w": 600,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 1400,
+      "y": 416,
+      "w": 800,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 2200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 2168,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 300,
+      "y": 310,
+      "w": 150,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 800,
+      "y": 280,
+      "w": 150,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1050,
+      "y": 310,
+      "w": 200,
+      "h": 32,
+      "type": "ice"
+    },
+    {
+      "x": 1350,
+      "y": 260,
+      "w": 200,
+      "h": 32,
+      "type": "ice"
+    }
+  ],
+  "traps": [
+    {
+      "type": "lava_pool",
+      "x": 600,
+      "y": 370,
+      "w": 100,
+      "h": 46,
+      "minH": 30,
+      "maxH": 80,
+      "rising": true,
+      "animOffset": 0
+    },
+    {
+      "type": "lava_pool",
+      "x": 1300,
+      "y": 380,
+      "w": 100,
+      "h": 36,
+      "minH": 20,
+      "maxH": 70,
+      "rising": false,
+      "animOffset": 1
+    },
+    {
+      "type": "spike_moving_h",
+      "x": 650,
+      "y": 340,
+      "w": 32,
+      "h": 32,
+      "dx": 2,
+      "minX": 600,
+      "maxX": 900,
+      "dir": 1
+    },
+    {
+      "type": "acid_drip",
+      "x": 900,
+      "y": 0,
+      "w": 40,
+      "h": 32,
+      "interval": 900
+    },
+    {
+      "type": "acid_drip",
+      "x": 1100,
+      "y": 0,
+      "w": 40,
+      "h": 32,
+      "interval": 700
+    },
+    {
+      "type": "spike_up",
+      "x": 1600,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 1632,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 1900,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "leap_of_faith_platform",
+      "x": 1700,
+      "y": 300,
+      "w": 120,
+      "h": 32,
+      "shiftPerJump": 15
+    }
+  ],
+  "events": [],
+  "door": {
+    "x": 2130,
+    "y": 352,
+    "locked": true
+  },
+  "key": {
+    "x": 850,
+    "y": 250,
+    "w": 28,
+    "h": 28,
+    "collected": false
+  },
+  "gravity": 1
+}

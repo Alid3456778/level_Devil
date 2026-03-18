@@ -1,0 +1,172 @@
+{
+  "id": 8,
+  "name": "THE GREAT TROLL",
+  "bgColor": "#1a0808",
+  "width": 1800,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 1800,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 1800,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 1768,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 300,
+      "y": 320,
+      "w": 300,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 750,
+      "y": 256,
+      "w": 300,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1200,
+      "y": 320,
+      "w": 300,
+      "h": 32,
+      "type": "solid"
+    }
+  ],
+  "traps": [
+    {
+      "type": "floor_hole",
+      "x": 200,
+      "y": 416,
+      "w": 80,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    },
+    {
+      "type": "floor_hole",
+      "x": 650,
+      "y": 416,
+      "w": 80,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    },
+    {
+      "type": "floor_hole",
+      "x": 1100,
+      "y": 416,
+      "w": 80,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    },
+    {
+      "type": "wall_moving",
+      "x": 900,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "dx": -1.5,
+      "minX": 600,
+      "maxX": 900,
+      "state": "moving"
+    },
+    {
+      "type": "spike_moving_h",
+      "x": 400,
+      "y": 384,
+      "w": 32,
+      "h": 32,
+      "dx": 3,
+      "minX": 300,
+      "maxX": 600,
+      "dir": 1
+    },
+    {
+      "type": "spike_up",
+      "x": 1600,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 1632,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_wheel",
+      "x": 500,
+      "y": 200,
+      "cx": 516,
+      "cy": 216,
+      "r": 55,
+      "angle": 0,
+      "speed": 0.06
+    },
+    {
+      "type": "fake_loading_screen",
+      "x": 1400,
+      "y": 200,
+      "w": 200,
+      "h": 120,
+      "triggerX": 1380
+    }
+  ],
+  "events": [
+    {
+      "trigger": "player_x",
+      "value": 180,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 0
+    },
+    {
+      "trigger": "player_x",
+      "value": 630,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 1
+    },
+    {
+      "trigger": "player_x",
+      "value": 1080,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 2
+    }
+  ],
+  "door": {
+    "x": 1720,
+    "y": 352
+  },
+  "key": null,
+  "gravity": 1
+}

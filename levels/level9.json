@@ -1,0 +1,176 @@
+{
+  "id": 9,
+  "name": "SAW GAUNTLET",
+  "bgColor": "#1a0808",
+  "width": 2000,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 2000,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 2000,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 1968,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 300,
+      "y": 320,
+      "w": 180,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 600,
+      "y": 250,
+      "w": 180,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 900,
+      "y": 320,
+      "w": 180,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1200,
+      "y": 250,
+      "w": 180,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1500,
+      "y": 320,
+      "w": 180,
+      "h": 32,
+      "type": "solid"
+    }
+  ],
+  "traps": [
+    {
+      "type": "saw_blade",
+      "x": 200,
+      "y": 384,
+      "r": 28,
+      "angle": 0,
+      "speed": 0.09,
+      "moveX": true,
+      "dx": 2.5,
+      "dir": 1,
+      "minX": 150,
+      "maxX": 420
+    },
+    {
+      "type": "saw_blade",
+      "x": 480,
+      "y": 384,
+      "r": 28,
+      "angle": 1,
+      "speed": -0.08,
+      "moveX": true,
+      "dx": 2,
+      "dir": -1,
+      "minX": 420,
+      "maxX": 700
+    },
+    {
+      "type": "saw_blade",
+      "x": 750,
+      "y": 384,
+      "r": 28,
+      "angle": 0,
+      "speed": 0.1,
+      "moveX": true,
+      "dx": 3,
+      "dir": 1,
+      "minX": 700,
+      "maxX": 1000
+    },
+    {
+      "type": "saw_blade",
+      "x": 1050,
+      "y": 384,
+      "r": 28,
+      "angle": 0,
+      "speed": -0.07,
+      "moveX": true,
+      "dx": 2,
+      "dir": -1,
+      "minX": 1000,
+      "maxX": 1300
+    },
+    {
+      "type": "saw_blade",
+      "x": 1350,
+      "y": 300,
+      "r": 24,
+      "angle": 0,
+      "speed": 0.12,
+      "moveY": true,
+      "dy": 2,
+      "dir": 1,
+      "minY": 250,
+      "maxY": 370
+    },
+    {
+      "type": "spike_up",
+      "x": 1700,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 1732,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 1764,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "input_inversion_zone",
+      "x": 1100,
+      "y": 0,
+      "w": 200,
+      "h": 480
+    }
+  ],
+  "events": [],
+  "door": {
+    "x": 1920,
+    "y": 352
+  },
+  "key": null,
+  "gravity": 1
+}

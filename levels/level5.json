@@ -1,0 +1,126 @@
+{
+  "id": 5,
+  "name": "WHEEL OF DOOM",
+  "bgColor": "#1a0a1a",
+  "width": 1800,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 1800,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 1800,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 1768,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 250,
+      "y": 320,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 600,
+      "y": 240,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 950,
+      "y": 300,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1300,
+      "y": 240,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    }
+  ],
+  "traps": [
+    {
+      "type": "spike_wheel",
+      "x": 450,
+      "y": 380,
+      "cx": 466,
+      "cy": 396,
+      "r": 60,
+      "angle": 0,
+      "speed": 0.04
+    },
+    {
+      "type": "spike_wheel",
+      "x": 800,
+      "y": 340,
+      "cx": 816,
+      "cy": 356,
+      "r": 50,
+      "angle": 1.05,
+      "speed": -0.05
+    },
+    {
+      "type": "spike_wheel",
+      "x": 1100,
+      "y": 370,
+      "cx": 1116,
+      "cy": 386,
+      "r": 70,
+      "angle": 0,
+      "speed": 0.03
+    },
+    {
+      "type": "spike_moving_h",
+      "x": 300,
+      "y": 384,
+      "w": 32,
+      "h": 32,
+      "dx": 3,
+      "minX": 250,
+      "maxX": 450,
+      "dir": 1
+    },
+    {
+      "type": "magnetic_spike",
+      "x": 1550,
+      "y": 32,
+      "w": 32,
+      "h": 32,
+      "state": "waiting",
+      "speed": 4
+    }
+  ],
+  "events": [],
+  "door": {
+    "x": 1720,
+    "y": 352
+  },
+  "key": null,
+  "gravity": 1
+}

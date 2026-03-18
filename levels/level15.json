@@ -1,0 +1,36 @@
+{
+  "id": 15,
+  "name": "THE SHRINKING GAP",
+  "bgColor": "#0d0a1a",
+  "width": 1800,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":500,  "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":1800, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1768, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":700,  "y":416, "w":1100, "h":64, "type":"solid" },
+    { "x":900,  "y":310, "w":200,  "h":32, "type":"solid" },
+    { "x":1200, "y":250, "w":200,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    {
+      "type":"shrinking_gap_platform",
+      "x":700, "y":416, "w":160, "h":64,
+      "shiftSpeed":5, "maxShift":280,
+      "_origX":700
+    },
+    { "type":"spike_up", "x":510, "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":542, "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":574, "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":606, "y":384, "w":32, "h":32 },
+    { "type":"spike_moving_h", "x":960,  "y":278, "w":32, "h":32, "dx":3, "minX":900,  "maxX":1100, "dir":1 },
+    { "type":"spike_moving_h", "x":1250, "y":218, "w":32, "h":32, "dx":2, "minX":1200, "maxX":1380, "dir":-1 }
+  ],
+  "events": [],
+  "door": { "x":1700, "y":352 },
+  "key": null,
+  "gravity": 1
+}

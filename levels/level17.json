@@ -1,0 +1,45 @@
+{
+  "id": 17,
+  "name": "JUMPSCARE SPIKES",
+  "bgColor": "#0a1a0a",
+  "width": 1800,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":400,  "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":1800, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1768, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1100, "y":416, "w":700,  "h":64, "type":"solid" },
+    { "x":1200, "y":300, "w":200,  "h":32, "type":"solid" },
+    { "x":1500, "y":240, "w":200,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    {
+      "type":"jumpscare_spike_platform",
+      "x":460,  "y":320, "w":160, "h":32,
+      "spikesActive":false, "decoyActive":true
+    },
+    {
+      "type":"jumpscare_spike_platform",
+      "x":700,  "y":250, "w":160, "h":32,
+      "spikesActive":false, "decoyActive":true
+    },
+    {
+      "type":"jumpscare_spike_platform",
+      "x":940,  "y":320, "w":160, "h":32,
+      "spikesActive":false, "decoyActive":true,
+      "variant":"slide_drop",
+      "_state":"waiting"
+    },
+    { "type":"floor_hole", "x":400, "y":416, "w":700, "h":64, "state":"open" },
+    { "type":"spike_up",   "x":1130, "y":384, "w":32,  "h":32 },
+    { "type":"spike_up",   "x":1162, "y":384, "w":32,  "h":32 },
+    { "type":"spike_moving_h", "x":1240, "y":268, "w":32, "h":32, "dx":2.5, "minX":1200, "maxX":1380, "dir":1 }
+  ],
+  "events": [],
+  "door": { "x":1710, "y":352 },
+  "key": null,
+  "gravity": 1
+}

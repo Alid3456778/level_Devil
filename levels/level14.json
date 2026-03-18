@@ -1,0 +1,360 @@
+{
+  "id": 14,
+  "name": "DEVIL'S GAUNTLET",
+  "bgColor": "#1a0000",
+  "width": 2400,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 2400,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 2400,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 2368,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 300,
+      "y": 310,
+      "w": 160,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 550,
+      "y": 240,
+      "w": 120,
+      "h": 32,
+      "type": "crumble"
+    },
+    {
+      "x": 750,
+      "y": 310,
+      "w": 120,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 950,
+      "y": 230,
+      "w": 140,
+      "h": 32,
+      "type": "crumble"
+    },
+    {
+      "x": 1150,
+      "y": 300,
+      "w": 120,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1350,
+      "y": 240,
+      "w": 120,
+      "h": 32,
+      "type": "ice"
+    },
+    {
+      "x": 1550,
+      "y": 310,
+      "w": 120,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1750,
+      "y": 240,
+      "w": 140,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 400,
+      "y": 32,
+      "w": 180,
+      "h": 32,
+      "type": "falling",
+      "vy": 0,
+      "state": "waiting",
+      "delay": 0
+    },
+    {
+      "x": 700,
+      "y": 32,
+      "w": 180,
+      "h": 32,
+      "type": "falling",
+      "vy": 0,
+      "state": "waiting",
+      "delay": 400
+    },
+    {
+      "x": 1000,
+      "y": 32,
+      "w": 180,
+      "h": 32,
+      "type": "falling",
+      "vy": 0,
+      "state": "waiting",
+      "delay": 800
+    }
+  ],
+  "traps": [
+    {
+      "type": "lava_pool",
+      "x": 820,
+      "y": 385,
+      "w": 130,
+      "h": 31,
+      "minH": 20,
+      "maxH": 60,
+      "rising": true,
+      "animOffset": 0
+    },
+    {
+      "type": "saw_blade",
+      "x": 200,
+      "y": 384,
+      "r": 26,
+      "angle": 0,
+      "speed": 0.1,
+      "moveX": true,
+      "dx": 3,
+      "dir": 1,
+      "minX": 150,
+      "maxX": 450
+    },
+    {
+      "type": "saw_blade",
+      "x": 1300,
+      "y": 384,
+      "r": 26,
+      "angle": 0,
+      "speed": -0.1,
+      "moveX": true,
+      "dx": 3,
+      "dir": -1,
+      "minX": 1200,
+      "maxX": 1500
+    },
+    {
+      "type": "laser",
+      "axis": "v",
+      "x": 600,
+      "y": 32,
+      "h": 384,
+      "period": 2000
+    },
+    {
+      "type": "laser",
+      "axis": "v",
+      "x": 1100,
+      "y": 32,
+      "h": 384,
+      "period": 2400
+    },
+    {
+      "type": "laser",
+      "axis": "h",
+      "x": 1600,
+      "y": 300,
+      "w": 600,
+      "period": 1800
+    },
+    {
+      "type": "piston",
+      "dir": "down",
+      "x": 1700,
+      "baseX": 1700,
+      "baseY": 32,
+      "y": 32,
+      "hitY": 32,
+      "w": 40,
+      "h": 20,
+      "reach": 200,
+      "period": 1600,
+      "extended": 0
+    },
+    {
+      "type": "piston",
+      "dir": "down",
+      "x": 1900,
+      "baseX": 1900,
+      "baseY": 32,
+      "y": 32,
+      "hitY": 32,
+      "w": 40,
+      "h": 20,
+      "reach": 180,
+      "period": 2000,
+      "extended": 0
+    },
+    {
+      "type": "acid_drip",
+      "x": 1800,
+      "y": 0,
+      "w": 40,
+      "h": 32,
+      "interval": 600
+    },
+    {
+      "type": "acid_drip",
+      "x": 2000,
+      "y": 0,
+      "w": 40,
+      "h": 32,
+      "interval": 800
+    },
+    {
+      "type": "electro_fence",
+      "x": 2100,
+      "y": 32,
+      "w": 32,
+      "h": 384,
+      "period": 1400,
+      "animOffset": 0
+    },
+    {
+      "type": "bounce_pad",
+      "x": 2200,
+      "y": 414,
+      "w": 64,
+      "h": 12,
+      "force": -20
+    },
+    {
+      "type": "spike_up",
+      "x": 2280,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 2312,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_wheel",
+      "x": 500,
+      "y": 360,
+      "cx": 516,
+      "cy": 376,
+      "r": 48,
+      "angle": 0,
+      "speed": 0.07
+    },
+    {
+      "type": "spike_wheel",
+      "x": 1600,
+      "y": 360,
+      "cx": 1616,
+      "cy": 376,
+      "r": 48,
+      "angle": 0.785,
+      "speed": -0.06
+    },
+    {
+      "type": "floor_hole",
+      "x": 350,
+      "y": 416,
+      "w": 80,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    },
+    {
+      "type": "floor_hole",
+      "x": 1100,
+      "y": 416,
+      "w": 80,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    },
+    {
+      "type": "input_inversion_zone",
+      "x": 1800,
+      "y": 0,
+      "w": 300,
+      "h": 480
+    },
+    {
+      "type": "expanding_spike",
+      "x": 2250,
+      "y": 384,
+      "w": 16,
+      "h": 16,
+      "maxScale": 4
+    },
+    {
+      "type": "boomerang_arrow",
+      "x": 1450,
+      "y": 280,
+      "w": 24,
+      "h": 12,
+      "speed": 6,
+      "dir": 1
+    }
+  ],
+  "events": [
+    {
+      "trigger": "player_x",
+      "value": 330,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 16
+    },
+    {
+      "trigger": "player_x",
+      "value": 1080,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 17
+    },
+    {
+      "trigger": "player_x",
+      "value": 380,
+      "triggered": false,
+      "action": "start_falling_ceiling"
+    }
+  ],
+  "door": {
+    "x": 2320,
+    "y": 352,
+    "locked": true
+  },
+  "key": {
+    "x": 2220,
+    "y": 350,
+    "w": 28,
+    "h": 28,
+    "collected": false
+  },
+  "gravity": 1
+}

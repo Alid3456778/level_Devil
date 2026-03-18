@@ -1,0 +1,42 @@
+{
+  "id": 18,
+  "name": "THE VOID GROWS",
+  "bgColor": "#000008",
+  "width": 1600,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":1600, "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":1600, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1568, "y":0,   "w":32,   "h":480,"type":"solid" }
+  ],
+  "traps": [
+    {
+      "type":"expanding_hole",
+      "x":720,  "y":416, "w":64, "h":64,
+      "_origX":720, "_origW":64,
+      "_minX":33, "_maxW":1502,
+      "expandSpeed":1.0,
+      "fillSpeed":0.6,
+      "fullDuration":100,
+      "waitDuration":200,
+      "_phase":"waiting",
+      "_waitTimer":120,
+      "expanding":false
+    },
+    { "type":"spike_up",  "x":200, "y":384, "w":32, "h":32 },
+    { "type":"spike_up",  "x":232, "y":384, "w":32, "h":32 },
+    { "type":"spike_up",  "x":1300,"y":384, "w":32, "h":32 },
+    { "type":"spike_up",  "x":1332,"y":384, "w":32, "h":32 },
+    { "type":"spike_moving_h", "x":600, "y":384, "w":32, "h":32, "dx":3, "minX":300, "maxX":700, "dir":1 },
+    { "type":"spike_moving_h", "x":900, "y":384, "w":32, "h":32, "dx":3, "minX":800, "maxX":1200, "dir":-1 },
+    { "type":"acid_drip", "x":400,  "y":0, "w":40, "h":32, "interval":1400 },
+    { "type":"acid_drip", "x":1000, "y":0, "w":40, "h":32, "interval":1200 }
+  ],
+  "events": [],
+  "door": { "x":1510, "y":352, "locked":true },
+  "key":  { "x":780, "y":370, "w":28, "h":28, "collected":false },
+  "gravity": 1
+}

@@ -1,0 +1,131 @@
+{
+  "id": 7,
+  "name": "SKY IS FALLING",
+  "bgColor": "#1a1a0d",
+  "width": 1600,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 1600,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 1600,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 1568,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 400,
+      "y": 300,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 700,
+      "y": 240,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 200,
+      "y": 32,
+      "w": 200,
+      "h": 32,
+      "type": "falling",
+      "vy": 0,
+      "state": "waiting",
+      "delay": 0
+    },
+    {
+      "x": 500,
+      "y": 32,
+      "w": 200,
+      "h": 32,
+      "type": "falling",
+      "vy": 0,
+      "state": "waiting",
+      "delay": 600
+    },
+    {
+      "x": 800,
+      "y": 32,
+      "w": 200,
+      "h": 32,
+      "type": "falling",
+      "vy": 0,
+      "state": "waiting",
+      "delay": 1200
+    },
+    {
+      "x": 1100,
+      "y": 32,
+      "w": 200,
+      "h": 32,
+      "type": "falling",
+      "vy": 0,
+      "state": "waiting",
+      "delay": 1800
+    }
+  ],
+  "traps": [
+    {
+      "type": "spike_up",
+      "x": 340,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 640,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "infinite_pit",
+      "x": 1100,
+      "y": 416,
+      "w": 96,
+      "h": 64,
+      "state": "open"
+    }
+  ],
+  "events": [
+    {
+      "trigger": "player_x",
+      "value": 180,
+      "triggered": false,
+      "action": "start_falling_ceiling"
+    }
+  ],
+  "door": {
+    "x": 1520,
+    "y": 352
+  },
+  "key": null,
+  "gravity": 1
+}

@@ -1,0 +1,29 @@
+{
+  "id": 1, "name": "TRUST NOTHING",
+  "bgColor": "#0d0d1a",
+  "width": 1600, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":1600, "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":1600, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1568, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":300,  "y":300, "w":160,  "h":32, "type":"solid" },
+    { "x":550,  "y":220, "w":120,  "h":32, "type":"solid" },
+    { "x":800,  "y":320, "w":200,  "h":32, "type":"fake_floor" },
+    { "x":1100, "y":260, "w":160,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    { "type":"floor_hole", "x":200, "y":416, "w":80, "h":64, "state":"closed", "delay":1500 },
+    { "type":"spike_up",   "x":480, "y":384, "w":32, "h":32 },
+    { "type":"spike_up",   "x":512, "y":384, "w":32, "h":32 },
+    { "type":"delayed_spike", "x":700, "y":384, "w":32, "h":32, "hidden":true, "popDelay":300 },
+    { "type":"fake_exit",  "x":1520, "y":352, "fakeOnly":true }
+  ],
+  "events": [
+    { "trigger":"player_x", "value":180, "triggered":false, "action":"open_hole", "trapIndex":0 }
+  ],
+  "door": { "x":1520, "y":352 },
+  "key": null,
+  "gravity": 1
+}

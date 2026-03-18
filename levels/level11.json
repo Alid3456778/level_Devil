@@ -1,0 +1,188 @@
+{
+  "id": 11,
+  "name": "PISTON PANIC",
+  "bgColor": "#0d1a0d",
+  "width": 1800,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 1800,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 1800,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 1768,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 300,
+      "y": 320,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 600,
+      "y": 240,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 900,
+      "y": 320,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1200,
+      "y": 240,
+      "w": 200,
+      "h": 32,
+      "type": "solid"
+    }
+  ],
+  "traps": [
+    {
+      "type": "piston",
+      "dir": "down",
+      "x": 250,
+      "baseX": 250,
+      "baseY": 32,
+      "y": 32,
+      "hitY": 32,
+      "w": 40,
+      "h": 20,
+      "reach": 160,
+      "period": 1600,
+      "extended": 0
+    },
+    {
+      "type": "piston",
+      "dir": "down",
+      "x": 450,
+      "baseX": 450,
+      "baseY": 32,
+      "y": 32,
+      "hitY": 32,
+      "w": 40,
+      "h": 20,
+      "reach": 200,
+      "period": 2000,
+      "extended": 0
+    },
+    {
+      "type": "piston",
+      "dir": "down",
+      "x": 650,
+      "baseX": 650,
+      "baseY": 32,
+      "y": 32,
+      "hitY": 32,
+      "w": 40,
+      "h": 20,
+      "reach": 180,
+      "period": 1400,
+      "extended": 0
+    },
+    {
+      "type": "piston",
+      "dir": "down",
+      "x": 850,
+      "baseX": 850,
+      "baseY": 32,
+      "y": 32,
+      "hitY": 32,
+      "w": 40,
+      "h": 20,
+      "reach": 220,
+      "period": 1800,
+      "extended": 0
+    },
+    {
+      "type": "piston",
+      "dir": "down",
+      "x": 1050,
+      "baseX": 1050,
+      "baseY": 32,
+      "y": 32,
+      "hitY": 32,
+      "w": 40,
+      "h": 20,
+      "reach": 190,
+      "period": 1500,
+      "extended": 0
+    },
+    {
+      "type": "piston",
+      "dir": "down",
+      "x": 1250,
+      "baseX": 1250,
+      "baseY": 32,
+      "y": 32,
+      "hitY": 32,
+      "w": 40,
+      "h": 20,
+      "reach": 170,
+      "period": 2200,
+      "extended": 0
+    },
+    {
+      "type": "piston",
+      "dir": "right",
+      "x": 32,
+      "baseX": 32,
+      "baseY": 200,
+      "y": 200,
+      "hitX": 32,
+      "w": 20,
+      "h": 40,
+      "reach": 200,
+      "period": 2600,
+      "extended": 0
+    },
+    {
+      "type": "spike_up",
+      "x": 1600,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 1632,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    }
+  ],
+  "events": [],
+  "door": {
+    "x": 1720,
+    "y": 352
+  },
+  "key": null,
+  "gravity": 1
+}

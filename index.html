@@ -1,0 +1,4799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0a0f">
+<title>Level Devil — Multiplayer</title>
+<!-- Socket.io — loaded from your own server (falls back to CDN) -->
+<script>
+  // Try to load socket.io from the game server; if offline fall back to CDN
+  window.SERVER_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:3000'
+    : window.location.origin; // same domain when deployed
+</script>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --red: #ff2a2a;
+    --orange: #ff6b00;
+    --yellow: #ffd700;
+    --white: #f0f0f0;
+    --gray: #333;
+    --dark: #111;
+    --glow: 0 0 10px #ff2a2a, 0 0 20px #ff2a2a44;
+    /* Safe area insets for notched phones */
+    --safe-top:    env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left:   env(safe-area-inset-left,  0px);
+    --safe-right:  env(safe-area-inset-right, 0px);
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--white);
+    font-family: 'Press Start 2P', monospace;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    /* Prevent iOS rubber-band scroll */
+    overscroll-behavior: none;
+  }
+
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100dvh; /* dynamic viewport for mobile */
+  }
+
+  /* ─── LANDSCAPE ENFORCE OVERLAY ─── */
+  #rotateMsg {
+    display: none;
+    position: fixed; inset: 0; z-index: 9999;
+    background: #0a0a0f;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    text-align: center;
+    padding: 20px;
+  }
+  #rotateMsg .rotate-icon { font-size: 52px; animation: rotateHint 1.5s ease-in-out infinite; }
+  #rotateMsg p { font-size: clamp(8px, 2.5vw, 12px); color: var(--orange); line-height: 2; }
+  @keyframes rotateHint {
+    0%,100% { transform: rotate(0deg); }
+    50%      { transform: rotate(90deg); }
+  }
+  /* Show rotate message only on portrait mobile */
+  @media (max-width: 768px) and (orientation: portrait) {
+    #rotateMsg { display: flex; }
+  }
+
+  /* ─── SCREENS ─── */
+  .screen {
+    display: none;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0; left: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .screen.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+
+  /* ─── NAME SCREEN ─── */
+  #nameScreen {
+    background: radial-gradient(ellipse at center, #1a0a0a 0%, #0a0a0f 70%);
+    padding: clamp(12px,3vw,32px);
+    gap: 8px;
+  }
+  #nameScreen .title {
+    font-size: clamp(18px, 5vw, 48px);
+    color: var(--red);
+    text-shadow: var(--glow);
+    margin-bottom: 4px;
+    animation: flicker 3s infinite;
+    text-align: center;
+  }
+  #nameScreen .subtitle {
+    font-size: clamp(7px, 1.5vw, 11px);
+    color: var(--orange);
+    margin-bottom: clamp(16px,4vw,40px);
+    letter-spacing: 3px;
+    text-align: center;
+  }
+  .skull-deco {
+    font-size: clamp(22px,5vw,36px);
+    margin-bottom: clamp(12px,3vw,24px);
+    animation: bob 2s ease-in-out infinite;
+  }
+  .name-form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    max-width: 320px;
+  }
+  .name-form input {
+    background: #111;
+    border: 2px solid var(--red);
+    color: var(--white);
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(10px,2.5vw,14px);
+    padding: clamp(10px,2vw,14px) 16px;
+    width: 100%;
+    outline: none;
+    text-align: center;
+    box-shadow: inset 0 0 10px #ff2a2a22;
+    /* Prevent iOS zoom on focus */
+    touch-action: manipulation;
+  }
+  .name-form input:focus { border-color: var(--orange); }
+
+  /* ─── BUTTONS ─── */
+  .btn {
+    background: var(--red);
+    color: #000;
+    border: none;
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(9px,2vw,12px);
+    padding: clamp(10px,2vw,14px) clamp(16px,3vw,28px);
+    cursor: pointer;
+    transition: all 0.1s;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    /* Large touch target */
+    min-height: 44px;
+    white-space: nowrap;
+  }
+  .btn:hover, .btn:active { background: var(--orange); }
+  .btn:active             { transform: scale(0.97); }
+  .btn-secondary {
+    background: transparent;
+    border: 2px solid var(--red);
+    color: var(--red);
+  }
+  .btn-secondary:hover, .btn-secondary:active { background: var(--red); color: #000; }
+
+  /* ─── CANVAS WRAPPER ─── */
+  #gameScreen { background: #000; position: relative; }
+  #gameCanvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    touch-action: none;
+  }
+
+  /* ─── HUD ─── */
+  #hud {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    padding: clamp(6px,1.5vw,10px) clamp(8px,2vw,16px);
+    padding-top: calc(clamp(6px,1.5vw,10px) + var(--safe-top));
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: linear-gradient(to bottom, #000000cc, transparent);
+    pointer-events: none;
+    z-index: 10;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  #hud .hud-item {
+    font-size: clamp(7px,1.8vw,10px);
+    color: var(--white);
+    text-shadow: 1px 1px 0 #000;
+    white-space: nowrap;
+  }
+  #hud .level-info  { color: var(--yellow); }
+  #hud .death-count { color: var(--red); }
+
+  /* ─── MOBILE CONTROLS (always shown on touch) ─── */
+  #mobileControls {
+    display: none;
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: clamp(110px, 22vw, 160px);
+    pointer-events: none;
+    z-index: 20;
+    padding-bottom: var(--safe-bottom);
+    padding-left:   var(--safe-left);
+    padding-right:  var(--safe-right);
+  }
+  .mobile-btn {
+    position: absolute;
+    background: rgba(255,255,255,0.10);
+    border: 2px solid rgba(255,255,255,0.22);
+    border-radius: 10px;
+    color: rgba(255,255,255,0.55);
+    font-size: clamp(18px,4vw,28px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: all;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: background 0.08s;
+    backdrop-filter: blur(4px);
+    /* Minimum 44×44 touch target */
+    min-width:  clamp(64px,14vw,90px);
+    min-height: clamp(64px,14vw,90px);
+  }
+  .mobile-btn:active, .mobile-btn.pressed {
+    background: rgba(255,80,80,0.35);
+    border-color: rgba(255,80,80,0.6);
+  }
+  #btnLeft  {
+    bottom: calc(16px + var(--safe-bottom));
+    left:   calc(16px + var(--safe-left));
+    width:  clamp(64px,14vw,90px);
+    height: clamp(64px,14vw,90px);
+  }
+  #btnRight {
+    bottom: calc(16px + var(--safe-bottom));
+    left:   calc(16px + var(--safe-left) + clamp(70px,15vw,100px));
+    width:  clamp(64px,14vw,90px);
+    height: clamp(64px,14vw,90px);
+  }
+  #btnJump  {
+    bottom: calc(16px + var(--safe-bottom));
+    right:  calc(16px + var(--safe-right));
+    width:  clamp(64px,14vw,90px);
+    height: clamp(64px,14vw,90px);
+    background: rgba(255,50,50,0.15);
+    border-color: rgba(255,80,80,0.4);
+  }
+  /* Show mobile controls on touch devices */
+  @media (pointer: coarse) {
+    #mobileControls { display: block; }
+  }
+
+  /* ─── OVERLAYS ─── */
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    background: rgba(0,0,0,0.80);
+    z-index: 30;
+    gap: clamp(10px,2vw,16px);
+    padding: clamp(16px,4vw,32px);
+  }
+  .overlay.hidden { display: none; }
+  .overlay h2 {
+    font-size: clamp(14px,4vw,28px);
+    color: var(--red);
+    text-shadow: var(--glow);
+    text-align: center;
+  }
+  .overlay p {
+    font-size: clamp(7px,2vw,10px);
+    color: #aaa;
+    text-align: center;
+    line-height: 1.9;
+    max-width: 320px;
+  }
+  #deathOverlay h2 { animation: shake 0.4s; }
+  #deathOverlay .death-msg {
+    color: var(--orange);
+    font-size: clamp(7px,2vw,10px);
+    margin: 4px 0;
+    min-height: 18px;
+    text-align: center;
+    max-width: 280px;
+  }
+  #levelClearOverlay h2 {
+    color: var(--yellow);
+    text-shadow: 0 0 10px #ffd700, 0 0 20px #ffd70044;
+  }
+  #levelClearOverlay .stats {
+    color: #aaa;
+    font-size: clamp(7px,1.8vw,9px);
+    line-height: 2;
+    text-align: center;
+  }
+
+  /* ─── ANIMATIONS ─── */
+  @keyframes flicker {
+    0%,19%,21%,23%,25%,54%,56%,100% { text-shadow: var(--glow); opacity:1; }
+    20%,24%,55% { text-shadow: none; opacity:0.7; }
+  }
+  @keyframes bob   { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+  @keyframes shake {
+    0%,100%{transform:translateX(0)}
+    20%{transform:translateX(-8px)} 40%{transform:translateX(8px)}
+    60%{transform:translateX(-6px)} 80%{transform:translateX(6px)}
+  }
+  @keyframes fadeIn { from{opacity:0;transform:scale(0.92)} to{opacity:1;transform:scale(1)} }
+  .fade-in { animation: fadeIn 0.3s ease; }
+
+  /* ════════════════════════════════════════════
+     MULTIPLAYER UI
+  ════════════════════════════════════════════ */
+
+  /* ─── MODE SELECT ─── */
+  #modeScreen {
+    background: radial-gradient(ellipse at center, #1a0a0a 0%, #0a0a0f 70%);
+    gap: 16px;
+    padding: clamp(12px,3vw,24px);
+  }
+  .mode-cards {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+    max-width: 500px;
+  }
+  .mode-card {
+    background: #111;
+    border: 2px solid #333;
+    padding: clamp(14px,3vw,22px) clamp(16px,3vw,26px);
+    width: clamp(130px,42vw,200px);
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    min-height: 44px;
+  }
+  .mode-card:hover,.mode-card:active {
+    border-color: var(--red);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px #ff2a2a44;
+  }
+  .mode-card .icon  { font-size: clamp(22px,5vw,34px); margin-bottom: 8px; }
+  .mode-card .label { font-size: clamp(8px,2vw,11px); color: var(--white); margin-bottom: 5px; }
+  .mode-card .desc  { font-size: clamp(6px,1.5vw,8px); color: #666; line-height: 1.8; }
+
+  /* ─── ROOM SCREEN ─── */
+  #roomScreen {
+    background: radial-gradient(ellipse at center, #0a0a1a 0%, #0a0a0f 70%);
+    gap: 12px;
+    padding: clamp(10px,3vw,20px);
+    overflow-y: auto;
+  }
+  .room-panels-wrap {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+  }
+  .room-panel {
+    background: #0d0d1a;
+    border: 2px solid #333;
+    padding: clamp(12px,2.5vw,20px);
+    width: clamp(240px, 90vw, 380px);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .room-panel h3 {
+    font-size: clamp(8px,2vw,10px);
+    color: var(--orange);
+    border-bottom: 1px solid #333;
+    padding-bottom: 6px;
+  }
+  .room-input-row { display: flex; gap: 8px; }
+  .room-input-row input {
+    flex: 1;
+    background: #111; border: 2px solid #333; color: var(--white);
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(9px,2vw,11px);
+    padding: clamp(8px,2vw,10px) 10px;
+    outline: none;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+  .room-input-row input:focus { border-color: var(--orange); }
+  .room-code-display {
+    font-size: clamp(18px,5vw,26px);
+    color: var(--yellow);
+    text-align: center;
+    letter-spacing: 5px;
+    padding: 10px;
+    background: #111;
+    border: 2px solid #ffd70044;
+    text-shadow: 0 0 10px #ffd700;
+  }
+  .room-status {
+    font-size: clamp(7px,1.8vw,8px);
+    color: #888;
+    text-align: center;
+    min-height: 14px;
+  }
+  .room-status.ok  { color: #00ff88; }
+  .room-status.err { color: var(--red); }
+
+  /* ─── LOBBY SCREEN ─── */
+  #lobbyScreen {
+    background: radial-gradient(ellipse at center, #0d1a0d 0%, #0a0a0f 70%);
+    padding: clamp(8px,2vw,16px);
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-y: auto;
+    gap: 8px;
+  }
+  .lobby-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    max-width: 900px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .lobby-title {
+    font-size: clamp(9px,2.5vw,13px);
+    color: var(--yellow);
+  }
+  .lobby-room-id {
+    font-size: clamp(7px,1.8vw,9px);
+    color: #555;
+  }
+  .lobby-room-id span { color: var(--yellow); letter-spacing: 3px; }
+  .lobby-layout {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    max-width: 900px;
+    flex: 1;
+    min-height: 0;
+  }
+  .lobby-left  { flex:1; display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .lobby-right { width: clamp(180px,30vw,260px); display:flex; flex-direction:column; gap:10px; flex-shrink:0; }
+  .lobby-panel {
+    background: #0d0d1a;
+    border: 2px solid #2a2a4a;
+    padding: clamp(8px,2vw,14px);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .lobby-panel h3 {
+    font-size: clamp(7px,1.8vw,9px);
+    color: var(--orange);
+    margin-bottom: 2px;
+  }
+  .player-list { display:flex; flex-direction:column; gap:5px; }
+  .player-slot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: clamp(5px,1.5vw,8px) clamp(6px,1.5vw,10px);
+    background: #111;
+    border: 1px solid #2a2a4a;
+    font-size: clamp(7px,1.8vw,9px);
+  }
+  .player-slot .p-color { width:12px; height:12px; border-radius:2px; flex-shrink:0; }
+  .player-slot .p-name  { flex:1; color:var(--white); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .player-slot .p-host  { font-size:clamp(6px,1.5vw,7px); color:var(--yellow); }
+  .player-slot .p-ready { font-size:clamp(6px,1.5vw,7px); color:#00ff88; }
+  .player-slot.empty    { opacity:0.3; border-style:dashed; }
+
+  /* ─── VOICE TILES (lobby + in-game) ─── */
+  #voicePanel {
+    position: absolute;
+    bottom: calc(clamp(110px,22vw,160px) + 8px);
+    right: calc(12px + var(--safe-right));
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    z-index: 25;
+    pointer-events: all;
+    max-width: 160px;
+  }
+  .voice-tile {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(0,0,0,0.78);
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 4px 7px;
+    backdrop-filter: blur(6px);
+  }
+  .voice-tile .vt-avatar {
+    width: 24px; height: 24px;
+    border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: bold; flex-shrink: 0;
+    border: 2px solid transparent;
+    transition: border-color 0.15s;
+  }
+  .voice-tile .vt-avatar.speaking {
+    border-color: #00ff88;
+    box-shadow: 0 0 6px #00ff8866;
+  }
+  .voice-tile .vt-name {
+    font-size: 6px; color: var(--white);
+    flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+  }
+  .voice-tile .vt-mic { font-size: 9px; cursor: pointer; }
+
+  /* Voice controls in-game */
+  #voiceControls {
+    position: absolute;
+    bottom: calc(clamp(110px,22vw,160px) + 8px);
+    left: calc(12px + var(--safe-left));
+    display: flex;
+    gap: 6px;
+    z-index: 25;
+    flex-wrap: wrap;
+    max-width: 50vw;
+  }
+  .vc-btn {
+    background: rgba(0,0,0,0.78);
+    border: 1px solid #444;
+    color: var(--white);
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(7px,2vw,9px);
+    padding: clamp(5px,1.5vw,7px) clamp(8px,2vw,12px);
+    cursor: pointer;
+    border-radius: 3px;
+    backdrop-filter: blur(4px);
+    transition: all 0.1s;
+    min-height: 36px;
+    white-space: nowrap;
+  }
+  .vc-btn:hover,.vc-btn:active { border-color: var(--orange); }
+  .vc-btn.muted  { color: var(--red);  border-color: var(--red); }
+  .vc-btn.active { color: #00ff88;     border-color: #00ff88; }
+
+  /* Ping */
+  #pingDisplay {
+    position: absolute;
+    top: calc(clamp(28px,6vw,44px) + var(--safe-top));
+    right: calc(8px + var(--safe-right));
+    font-size: clamp(6px,1.5vw,7px);
+    color: #00ff88;
+    background: rgba(0,0,0,0.6);
+    padding: 2px 6px;
+    border-radius: 2px;
+    z-index: 15;
+    pointer-events: none;
+  }
+
+  /* Connecting overlay */
+  #connectingOverlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.9);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px; z-index: 100;
+    padding: 20px;
+  }
+  #connectingOverlay.hidden { display: none; }
+  #connectingOverlay .conn-title { font-size: clamp(10px,3vw,14px); color: var(--orange); text-align:center; }
+  #connectingOverlay .conn-sub   { font-size: clamp(7px,2vw,8px);  color: #888; text-align:center; }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 4px solid #333;
+    border-top-color: var(--red);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ─── LOBBY RESPONSIVE: stack on small landscape screens ─── */
+  @media (max-height: 500px) {
+    .lobby-layout { flex-direction: row; }
+    .lobby-right  { width: clamp(150px,28vw,200px); }
+    .lobby-panel  { padding: 6px 8px; }
+    .lobby-panel h3 { font-size: 7px; }
+  }
+  @media (max-width: 600px) {
+    .lobby-layout { flex-direction: column; }
+    .lobby-right  { width: 100%; }
+  }
+  @media (max-width: 400px) {
+    .room-panel { padding: 10px; }
+    .btn { font-size: 8px; padding: 10px 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══ FAKE LOADING SCREEN (Level 8 trap) ══ -->
+<div id="fakeLoadOverlay" style="display:none;position:fixed;inset:0;z-index:50;
+  background:#0a0a0f;align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+  <div style="font-size:clamp(10px,2vw,14px);color:#ff2a2a;">LOADING...</div>
+  <div class="spinner"></div>
+  <div style="font-size:clamp(7px,1.5vw,8px);color:#555;">Please wait</div>
+  <div style="font-size:clamp(7px,1.5vw,8px);color:#ff6b00;margin-top:8px;">KEEP MOVING OR YOU DIE</div>
+</div>
+
+<!-- ══ ROTATE TO LANDSCAPE ══ -->
+<div id="rotateMsg">
+  <div class="rotate-icon">📱</div>
+  <p>ROTATE YOUR DEVICE<br>TO LANDSCAPE TO PLAY</p>
+</div>
+
+<!-- ══════════════ CONNECTING OVERLAY ══════════════ -->
+<div id="connectingOverlay" class="hidden">
+  <div class="spinner"></div>
+  <div class="conn-title" id="connTitle">CONNECTING...</div>
+  <div class="conn-sub"   id="connSub">Setting up connection</div>
+</div>
+
+<!-- ══════════════ NAME SCREEN ══════════════ -->
+<div id="nameScreen" class="screen active">
+  <div class="skull-deco">💀</div>
+  <div class="title">LEVEL DEVIL</div>
+  <div class="subtitle">— NOT A TROLL GAME —</div>
+  <div style="font-size:clamp(6px,1.5vw,8px);color:#ff6b00;margin-bottom:16px;letter-spacing:2px;text-align:center;">
+    ⚡ PHASE 3 — MULTIPLAYER · VOICE · ROOMS ⚡
+  </div>
+  <div class="name-form">
+    <input type="text" id="playerNameInput" placeholder="ENTER YOUR NAME"
+           maxlength="12" autocomplete="off" spellcheck="false"
+           onkeydown="if(event.key==='Enter')goToModeSelect()">
+    <button class="btn" onclick="goToModeSelect()">CONTINUE ▶</button>
+    <div style="font-size:clamp(6px,1.5vw,7px);color:#555;margin-top:10px;text-align:center;line-height:2;">
+      WASD / ARROWS · SPACE TO JUMP
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ MODE SELECT ══════════════ -->
+<div id="modeScreen" class="screen">
+  <div class="title" style="font-size:clamp(14px,3vw,26px);color:var(--red);text-shadow:var(--glow);margin-bottom:8px;">SELECT MODE</div>
+  <div class="mode-cards">
+    <div class="mode-card" onclick="startSoloGame()">
+      <div class="icon">👤</div>
+      <div class="label">SOLO PLAY</div>
+      <div class="desc">Play alone<br>All 14 levels</div>
+    </div>
+    <div class="mode-card" onclick="goToRoomScreen()">
+      <div class="icon">🌐</div>
+      <div class="label">MULTIPLAYER</div>
+      <div class="desc">Play with friends<br>Voice chat · 4 players</div>
+    </div>
+  </div>
+  <button class="btn btn-secondary" id="randBtn" onclick="toggleRandomizer()"
+          style="font-size:clamp(7px,2vw,9px);padding:10px 16px;margin-top:12px;">
+    🎲 RANDOM ORDER: OFF
+  </button>
+  <button class="btn btn-secondary" onclick="showScreen('nameScreen')"
+          style="margin-top:8px;font-size:clamp(7px,2vw,8px);padding:8px 14px;">← BACK</button>
+</div>
+
+<!-- ══════════════ ROOM SCREEN ══════════════ -->
+<div id="roomScreen" class="screen">
+  <div class="title" style="font-size:clamp(13px,2.5vw,22px);color:var(--red);text-shadow:var(--glow);margin-bottom:8px;">MULTIPLAYER</div>
+  <div class="room-panels-wrap">
+
+    <!-- Create Room -->
+    <div class="room-panel">
+      <h3>🏠 CREATE ROOM</h3>
+      <div style="font-size:clamp(7px,2vw,8px);color:#888;">Share this code with friends:</div>
+      <div class="room-code-display" id="myRoomCode">------</div>
+      <button class="btn" id="createRoomBtn" onclick="createRoom()"
+              style="font-size:clamp(8px,2vw,9px);">CREATE ROOM</button>
+      <div class="room-status" id="createStatus">Ready to create a room</div>
+    </div>
+
+    <!-- Join Room -->
+    <div class="room-panel">
+      <h3>🔗 JOIN ROOM</h3>
+      <div style="font-size:clamp(7px,2vw,8px);color:#888;">Enter room code from host:</div>
+      <div class="room-input-row">
+        <input type="text" id="joinCodeInput" placeholder="ENTER CODE" maxlength="8"
+               style="text-transform:uppercase;letter-spacing:3px;"
+               oninput="this.value=this.value.toUpperCase()"
+               onkeydown="if(event.key==='Enter')joinRoom()">
+        <button class="btn" onclick="joinRoom()"
+                style="font-size:clamp(8px,2vw,9px);padding:0 14px;">JOIN</button>
+      </div>
+      <div class="room-status" id="joinStatus">Enter a room code to join</div>
+    </div>
+  </div>
+  <button class="btn btn-secondary" onclick="showScreen('modeScreen')"
+          style="margin-top:14px;font-size:clamp(7px,2vw,8px);padding:8px 14px;">← BACK</button>
+</div>
+
+<!-- ══════════════ LOBBY SCREEN ══════════════ -->
+<div id="lobbyScreen" class="screen">
+  <div class="lobby-header">
+    <div class="lobby-title">LOBBY</div>
+    <div class="lobby-room-id">ROOM: <span id="lobbyRoomCode">------</span></div>
+  </div>
+  <div class="lobby-layout">
+
+    <!-- Left: Players + Voice -->
+    <div class="lobby-left">
+      <div class="lobby-panel">
+        <h3>👥 PLAYERS (MAX 4)</h3>
+        <div class="player-list" id="playerList"></div>
+      </div>
+      <div class="lobby-panel" style="flex:1;">
+        <h3>🎙️ VOICE CHAT</h3>
+        <div id="lobbyVoiceTiles" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <button class="vc-btn" id="lobbyMicBtn" onclick="toggleMic()"
+                style="margin-top:8px;width:100%;text-align:center;">🔇 MIC OFF</button>
+        <div id="voiceStatusMsg"
+             style="font-size:clamp(6px,1.5vw,7px);color:#888;margin-top:4px;text-align:center;min-height:12px;"></div>
+      </div>
+    </div>
+
+    <!-- Right: Settings + Start -->
+    <div class="lobby-right">
+      <div class="lobby-panel">
+        <h3>⚙️ SETTINGS</h3>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:clamp(6px,1.5vw,7px);color:#888;line-height:2.2;">
+          <input type="checkbox" id="chkRandomize" onchange="toggleRandomizer()">
+          RANDOM LEVELS
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:clamp(6px,1.5vw,7px);color:#888;margin-top:4px;line-height:2.2;">
+          <input type="checkbox" id="chkRope" checked>
+          ROPE PHYSICS
+        </label>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:auto;">
+        <button class="btn" id="startGameBtn" onclick="hostStartGame()"
+                style="font-size:clamp(8px,2vw,9px);display:none;">▶ START GAME</button>
+        <div id="waitingForHost"
+             style="font-size:clamp(6px,1.5vw,7px);color:#555;text-align:center;">
+          Waiting for host...
+        </div>
+        <button class="btn btn-secondary" onclick="leaveLobby()"
+                style="font-size:clamp(7px,2vw,8px);padding:8px;">LEAVE LOBBY</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ GAME SCREEN ══════════════ -->
+<div id="gameScreen" class="screen">
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-item level-info" id="hudLevel">LEVEL 1</div>
+    <div class="hud-item" id="hudPlayer">PLAYER</div>
+    <div class="hud-item" id="hudTrap" style="color:#ff8800;font-size:clamp(6px,1.5vw,8px);"></div>
+    <div class="hud-item death-count" id="hudDeaths">💀 0</div>
+  </div>
+
+  <!-- Ping (multiplayer only) -->
+  <div id="pingDisplay" style="display:none;">● --ms</div>
+
+  <!-- Voice tiles in-game -->
+  <div id="voicePanel"></div>
+
+  <!-- Voice controls -->
+  <div id="voiceControls" style="display:none;">
+    <button class="vc-btn" id="inGameMicBtn" onclick="toggleMic()">🔇 MIC</button>
+    <button class="vc-btn" onclick="leaveGame()"
+            style="border-color:#ff2a2a;color:#ff2a2a;">✕ LEAVE</button>
+  </div>
+
+  <!-- Mobile Controls -->
+  <div id="mobileControls">
+    <div class="mobile-btn" id="btnLeft" >◀</div>
+    <div class="mobile-btn" id="btnRight">▶</div>
+    <div class="mobile-btn" id="btnJump" >▲</div>
+  </div>
+
+  <!-- Death Overlay -->
+  <div id="deathOverlay" class="overlay hidden">
+    <h2>YOU DIED</h2>
+    <div class="death-msg" id="deathMsg"></div>
+    <p>DEATHS: <span id="deathCountDisplay" style="color:var(--red)">0</span></p>
+    <button class="btn" onclick="respawnPlayer()">TRY AGAIN</button>
+  </div>
+
+  <!-- Level Clear -->
+  <div id="levelClearOverlay" class="overlay hidden">
+    <h2>LEVEL CLEAR!</h2>
+    <div class="stats" id="levelStats"></div>
+    <button class="btn" id="nextLevelBtn" onclick="nextLevel()">NEXT LEVEL ▶</button>
+  </div>
+
+  <!-- Win Screen -->
+  <div id="winOverlay" class="overlay hidden">
+    <h2 style="color:var(--yellow)">🏆 YOU WIN!</h2>
+    <p id="winStats">You conquered all levels!</p>
+    <button class="btn" onclick="restartGame()">PLAY AGAIN</button>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════
+//  LEVEL DEVIL — Phase 3: Multiplayer + Voice
+//  Architecture:
+//    Signaling : Socket.io (your own server)
+//    Game data : Socket.io relay (host → server → clients)
+//    Voice     : WebRTC audio (server-signaled, direct P2P audio)
+//    Host      : authoritative — simulates all physics
+//    Clients   : send input, receive & render state
+// ════════════════════════════════════════════════
+
+// ─── CONSTANTS ───────────────────────────────
+const GRAVITY       = 0.55;
+const JUMP_FORCE    = -13;
+const MOVE_SPEED    = 4.5;
+const PLAYER_W      = 28;
+const PLAYER_H      = 36;
+const TILE          = 32;
+const GROUND_H      = TILE;
+
+// ─── PLAYER COLORS ────────────────────────────
+const PLAYER_COLORS = ['#e8e8e8','#ff8844','#44aaff','#88ff44'];
+const PLAYER_DARK   = ['#888','#994422','#225588','#448822'];
+
+// ════════════════════════════════════════════════
+//  PHASE 3 — MULTIPLAYER STATE (Socket.io)
+// ════════════════════════════════════════════════
+let multiMode   = false;   // true when in multiplayer
+let isHost      = false;   // true for room creator
+let myPlayerIdx = 0;       // slot 0-3
+let roomCode    = null;    // 6-char room code
+let socket      = null;    // Socket.io socket
+let mySocketId  = null;
+
+// socketId → { socketId, name, slot }
+const players = new Map();
+
+// Remote players state: slot → { x, y, vx, vy, facing, gravityFlipped, alive, name, animFrame }
+const remotePlayers = new Map();
+
+// Ping tracking
+let pingInterval = null;
+let myPing = 0;
+let _pingSentAt = 0;
+
+// ─── MEDIA (Voice — WebRTC audio only) ───────
+let localStream      = null;
+let micEnabled       = false;
+// peerConnections: socketId → RTCPeerConnection (for voice)
+const peerConns      = new Map();
+const remoteStreams   = new Map(); // slot → MediaStream
+const audioAnalysers  = new Map(); // slot → AnalyserNode
+let audioCtx         = null;
+
+// ─── ROPE MULTIPLAYER ─────────────────────────
+const ROPE_MAX_LEN  = 200;
+const ROPE_SNAP_LEN = 280;
+
+// ─── GAME STATE BROADCAST ────────────────────
+let stateTickAccum  = 0;
+const STATE_TICK_MS = 33; // ~30 Hz
+let lastInputSent   = 0;
+
+// ════════════════════════════════════════════════
+//  SOCKET.IO — INIT & CONNECT
+// ════════════════════════════════════════════════
+function connectSocket(cb) {
+  if (socket && socket.connected) { cb && cb(); return; }
+
+  try {
+    socket = io(window.SERVER_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 8000,
+    });
+  } catch(e) {
+    console.warn('[Socket] io() failed — server offline?', e.message);
+    _setConnStatus('⚠ Server unreachable. Check SERVER_URL.');
+    return;
+  }
+
+  socket.on('connect', () => {
+    mySocketId = socket.id;
+    console.log('[Socket] Connected:', mySocketId);
+    cb && cb();
+  });
+
+  socket.on('connect_error', (err) => {
+    console.warn('[Socket] Connect error:', err.message);
+    _setConnStatus('⚠ Cannot reach server: ' + err.message);
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('[Socket] Disconnected:', reason);
+    if (multiMode) _setConnStatus('⚠ Disconnected: ' + reason);
+  });
+
+  // ── Room events ──
+  socket.on('room:player_joined', ({ player }) => {
+    players.set(player.socketId, player);
+    remotePlayers.set(player.slot, {
+      x: 60 + player.slot * 40, y: 380,
+      vx: 0, vy: 0, facing: 1,
+      gravityFlipped: false, alive: true,
+      name: player.name, animFrame: 0,
+    });
+    updateLobbyUI();
+    updateLobbyVoiceTiles();
+    _setConnStatus(`» ${player.name} joined`);
+    // Voice: call the new player
+    _voiceCallPeer(player.socketId, player.slot);
+  });
+
+  socket.on('room:player_left', ({ socketId, slot, name }) => {
+    players.delete(socketId);
+    remotePlayers.delete(slot);
+    removeVoiceTile(slot);
+    _closePeerConn(socketId);
+    updateLobbyUI();
+    updateLobbyVoiceTiles();
+    _setConnStatus(`» ${name} left`);
+  });
+
+  socket.on('room:new_host', ({ socketId }) => {
+    if (socketId === mySocketId) {
+      isHost = true;
+      const btn = document.getElementById('startGameBtn');
+      if (btn) btn.style.display = 'block';
+      const wait = document.getElementById('waitingForHost');
+      if (wait) wait.style.display = 'none';
+      _setConnStatus('You are now the host');
+    }
+  });
+
+  // ── WebRTC voice signaling ──
+  socket.on('voice:offer', async ({ from, offer }) => {
+    await _handleVoiceOffer(from, offer);
+  });
+
+  socket.on('voice:answer', async ({ from, answer }) => {
+    const pc = peerConns.get(from);
+    if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+  });
+
+  socket.on('voice:ice', async ({ from, candidate }) => {
+    const pc = peerConns.get(from);
+    if (pc && candidate) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
+    }
+  });
+
+  // ── Game events (host → clients via server) ──
+  socket.on('game:start', ({ levelOrder, summary }) => {
+    _applyRoomSummary(summary);
+    window.__levelOrder = levelOrder;
+    launchMultiplayerGame(levelOrder);
+  });
+
+  socket.on('game:state', (payload) => {
+    if (!isHost) applyGameState(payload);
+  });
+
+  socket.on('game:input', (payload) => {
+    if (isHost) {
+      const p = [...players.values()].find(x => x.socketId === payload.fromSocketId);
+      if (p) applyRemoteInput(p.slot, payload);
+    }
+  });
+
+  socket.on('game:event', ({ type, fromSocketId, ...data }) => {
+    const p = [...players.values()].find(x => x.socketId === fromSocketId);
+    switch (type) {
+      case 'player_died': {
+        if (!p) return;
+        const rp = remotePlayers.get(p.slot);
+        if (rp) {
+          rp.alive = false;
+          spawnParticles(rp.x + PLAYER_W/2, rp.y + PLAYER_H/2, PLAYER_COLORS[p.slot]||'#ff2a2a', 20);
+        }
+        // ALL PLAYERS RESTART: when anyone dies, full level restart for everyone
+        // Show death message then reload level for local player too
+        if (gameState === 'playing') {
+          const msg = data.msg || `${p.name || 'A PLAYER'} DIED — RESTARTING LEVEL!`;
+          deathCount++;
+          levelDeaths++;
+          document.getElementById('hudDeaths').textContent = `💀 ${deathCount}`;
+          spawnParticles(player.x + PLAYER_W/2, player.y + PLAYER_H/2, '#ff2a2a', 16);
+          shakeTimer = 20;
+          gameState = 'dead';
+          setTimeout(() => {
+            document.getElementById('deathMsg').textContent = msg;
+            document.getElementById('deathCountDisplay').textContent = deathCount;
+            showOverlay('deathOverlay');
+          }, 400);
+        }
+        break;
+      }
+      case 'player_respawn': {
+        if (!p) return;
+        const rp2 = remotePlayers.get(p.slot);
+        if (rp2) { rp2.alive = true; rp2.x = data.x; rp2.y = data.y; }
+        break;
+      }
+      case 'level_complete':
+        if (isHost) hostAdvanceLevel();
+        break;
+      case 'level_load':
+        currentLevelIndex = data.levelIndex;
+        loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
+        hideOverlay('deathOverlay');
+        break;
+    }
+  });
+
+  // ── Ping ──
+  socket.on('ping:res', ({ ts }) => {
+    myPing = Date.now() - ts;
+    updatePingDisplay();
+  });
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 3 — NAVIGATION & MODE FLOW
+// ════════════════════════════════════════════════
+function goToModeSelect() {
+  const inp = document.getElementById('playerNameInput');
+  playerName = inp.value.trim().toUpperCase() || 'PLAYER';
+  showScreen('modeScreen');
+}
+
+function startSoloGame() {
+  multiMode = false;
+  isHost    = false;
+  startGame();
+}
+
+function goToRoomScreen() {
+  showScreen('roomScreen');
+  // Pre-connect socket in background so joining is instant
+  if (!socket || !socket.connected) connectSocket();
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 3 — CREATE / JOIN ROOM
+// ════════════════════════════════════════════════
+function genRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function createRoom() {
+  const btn = document.getElementById('createRoomBtn');
+  btn.disabled = true;
+  setStatus('createStatus', 'Connecting to server...', '');
+
+  const doCreate = () => {
+    socket.emit('room:create', { name: playerName }, (res) => {
+      btn.disabled = false;
+      if (!res.ok) {
+        setStatus('createStatus', 'Error: ' + (res.reason || 'unknown'), 'err');
+        return;
+      }
+      roomCode    = res.code;
+      isHost      = true;
+      myPlayerIdx = res.slot; // always 0 for host
+      mySocketId  = socket.id;
+
+      _applyRoomSummary(res.summary);
+
+      document.getElementById('myRoomCode').textContent = roomCode;
+      setStatus('createStatus', '✓ Room ready!', 'ok');
+
+      // Enter lobby immediately
+      enterLobby();
+    });
+  };
+
+  if (socket && socket.connected) {
+    doCreate();
+  } else {
+    connectSocket(doCreate);
+  }
+}
+
+function joinRoom() {
+  const code = document.getElementById('joinCodeInput').value.trim().toUpperCase();
+  if (code.length < 4) { setStatus('joinStatus', 'Enter a valid code', 'err'); return; }
+
+  setStatus('joinStatus', 'Connecting...', '');
+  showConnecting('JOINING ROOM...', 'Looking for ' + code);
+
+  const doJoin = () => {
+    socket.emit('room:join', { code, name: playerName }, (res) => {
+      hideConnecting();
+      if (!res.ok) {
+        setStatus('joinStatus', res.reason || 'Could not join', 'err');
+        return;
+      }
+      roomCode    = res.code;
+      isHost      = false;
+      myPlayerIdx = res.slot;
+      mySocketId  = socket.id;
+
+      _applyRoomSummary(res.summary);
+      setStatus('joinStatus', '✓ Joined!', 'ok');
+      enterLobby();
+    });
+  };
+
+  if (socket && socket.connected) {
+    doJoin();
+  } else {
+    connectSocket(doJoin);
+  }
+}
+
+function _applyRoomSummary(summary) {
+  players.clear();
+  remotePlayers.clear();
+  summary.players.forEach(p => {
+    players.set(p.socketId, p);
+    if (p.socketId !== mySocketId) {
+      remotePlayers.set(p.slot, {
+        x: 60 + p.slot*40, y: 380,
+        vx: 0, vy: 0, facing: 1,
+        gravityFlipped: false, alive: true,
+        name: p.name, animFrame: 0,
+      });
+    }
+  });
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 3 — LOBBY
+// ════════════════════════════════════════════════
+function enterLobby() {
+  document.getElementById('lobbyRoomCode').textContent = roomCode;
+  document.getElementById('startGameBtn').style.display = isHost ? 'block' : 'none';
+  document.getElementById('waitingForHost').style.display = isHost ? 'none' : 'block';
+
+  updateLobbyUI();
+  updateLobbyVoiceTiles();
+  showScreen('lobbyScreen');
+
+  // Auto-start mic
+  if (!localStream) {
+    setTimeout(() => requestMedia(), 400);
+  }
+
+  // Ping interval
+  if (pingInterval) clearInterval(pingInterval);
+  pingInterval = setInterval(() => {
+    if (socket && socket.connected) {
+      _pingSentAt = Date.now();
+      socket.emit('ping:req', { ts: _pingSentAt });
+    }
+  }, 2000);
+}
+
+function buildLobbyState() {
+  return { players: [...players.values()], levelOrder, randomizeMode };
+}
+
+function updateLobbyUI() {
+  const list = document.getElementById('playerList');
+  if (!list) return;
+  list.innerHTML = '';
+
+  // Build slot map — self + remote players
+  const slotMap = new Map();
+  slotMap.set(myPlayerIdx, { slot: myPlayerIdx, name: playerName, isMe: true });
+  players.forEach(p => {
+    if (p.socketId !== mySocketId && !slotMap.has(p.slot)) {
+      slotMap.set(p.slot, { slot: p.slot, name: p.name, isMe: false });
+    }
+  });
+
+  for (let i = 0; i < 4; i++) {
+    const p = slotMap.get(i);
+    const div = document.createElement('div');
+    div.className = 'player-slot' + (p ? '' : ' empty');
+    if (p) {
+      div.innerHTML = `
+        <div class="p-color" style="background:${PLAYER_COLORS[i]}"></div>
+        <div class="p-name">${p.name}${p.isMe ? ' (YOU)' : ''}</div>
+        ${p.slot === 0 ? '<div class="p-host">👑 HOST</div>' : ''}
+        <div class="p-ready" style="color:#00ff88;">●</div>
+      `;
+    } else {
+      div.innerHTML = `<div class="p-color" style="background:#333"></div><div class="p-name" style="color:#444;">WAITING...</div>`;
+    }
+    list.appendChild(div);
+  }
+}
+
+function addLobbyChat(sender, text, isSystem) {
+  if (isSystem) {
+    const statusEl = document.getElementById('voiceStatusMsg');
+    if (statusEl) {
+      statusEl.textContent = '» ' + text;
+      clearTimeout(statusEl._clearTimer);
+      statusEl._clearTimer = setTimeout(() => {
+        if (statusEl.textContent.startsWith('» ')) statusEl.textContent = '';
+      }, 4000);
+    }
+  }
+}
+
+function sendLobbyChat() { /* chat removed — use voice */ }
+
+function hostStartGame() {
+  if (!isHost || !socket) return;
+  buildLevelOrder();
+  socket.emit('room:start', { levelOrder }, (res) => {
+    if (!res || !res.ok) {
+      console.warn('[Host] Start failed');
+      return;
+    }
+    launchMultiplayerGame(levelOrder);
+  });
+}
+
+function launchMultiplayerGame(lvlOrder) {
+  if (lvlOrder) levelOrder = lvlOrder;
+  multiMode = true;
+  deathCount = 0;
+  currentLevelIndex = 0;
+  gameState = 'playing';
+
+  showScreen('gameScreen');
+  resize();
+  loadLevel(currentLevelIndex).then(() => {
+    document.getElementById('pingDisplay').style.display = 'block';
+    document.getElementById('voiceControls').style.display = 'flex';
+    buildVoicePanel();
+    if (animFrame) cancelAnimationFrame(animFrame);
+    animFrame = requestAnimationFrame(loop);
+  });
+}
+
+function leaveLobby() {
+  if (socket) socket.emit('room:leave');
+  players.clear();
+  remotePlayers.clear();
+  _closeAllPeerConns();
+  if (pingInterval) clearInterval(pingInterval);
+  multiMode = false;
+  showScreen('roomScreen');
+}
+
+function leaveGame() {
+  if (socket) socket.emit('room:leave');
+  players.clear();
+  remotePlayers.clear();
+  _closeAllPeerConns();
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  micEnabled = false;
+  if (pingInterval) clearInterval(pingInterval);
+  multiMode = false;
+  if (animFrame) cancelAnimationFrame(animFrame);
+  document.getElementById('pingDisplay').style.display = 'none';
+  document.getElementById('voiceControls').style.display = 'none';
+  document.getElementById('voicePanel').innerHTML = '';
+  showScreen('modeScreen');
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 3 — GAME STATE SYNC
+// ════════════════════════════════════════════════
+function broadcastGameState() {
+  if (!isHost || !multiMode || !socket) return;
+  const state = {
+    ts: Date.now(),
+    players: buildAllPlayerStates(),
+    traps: traps.map((t,i) => ({
+      i, state: t.state, x: t.x, y: t.y,
+      angle: t.angle, extended: t.extended,
+      on: t.on,
+      drops: t.drops ? t.drops.map(d=>({x:d.x,y:d.y})) : undefined,
+    })),
+    platforms: platforms.map((p,i) => ({ i, state: p.state, y: p.y })),
+    key:  key  ? { collected: key.collected }  : null,
+    door: door ? { open: door.open } : null,
+  };
+  socket.emit('game:state', state);
+}
+
+function buildAllPlayerStates() {
+  const states = [{
+    slot: myPlayerIdx,
+    x: player.x, y: player.y,
+    vx: player.vx, vy: player.vy,
+    facing: player.facing,
+    gravityFlipped: player.gravityFlipped,
+    alive: player.alive,
+    animFrame: player.animFrame,
+    name: playerName,
+  }];
+  remotePlayers.forEach((rp, slot) => states.push({ slot, ...rp }));
+  return states;
+}
+
+function applyGameState(msg) {
+  msg.players.forEach(ps => {
+    if (ps.slot === myPlayerIdx) return;
+    remotePlayers.set(ps.slot, { ...ps });
+  });
+  msg.traps.forEach(ts => {
+    if (!traps[ts.i]) return;
+    Object.assign(traps[ts.i], {
+      state:    ts.state,
+      x:        ts.x,
+      y:        ts.y,
+      angle:    ts.angle    ?? traps[ts.i].angle,
+      extended: ts.extended ?? traps[ts.i].extended,
+      on:       ts.on       ?? traps[ts.i].on,
+      drops:    ts.drops    ?? traps[ts.i].drops,
+    });
+  });
+  msg.platforms.forEach(ps => {
+    if (!platforms[ps.i]) return;
+    platforms[ps.i].state = ps.state;
+    platforms[ps.i].y     = ps.y;
+  });
+  if (msg.key  && key)  key.collected  = msg.key.collected;
+  if (msg.door && door) door.open      = msg.door.open;
+}
+
+function sendInputToHost() {
+  if (!multiMode || isHost || !socket) return;
+  const now = Date.now();
+  if (now - lastInputSent < 16) return; // 60 Hz cap
+  lastInputSent = now;
+  socket.emit('game:input', {
+    left:  keys.left  || touchLeft,
+    right: keys.right || touchRight,
+    jump:  keys.jump  || touchJump,
+    x: player.x, y: player.y,
+    vx: player.vx, vy: player.vy,
+    alive: player.alive,
+    facing: player.facing,
+    gravityFlipped: player.gravityFlipped,
+    animFrame: player.animFrame,
+  });
+}
+
+function applyRemoteInput(slot, msg) {
+  remotePlayers.set(slot, {
+    ...(remotePlayers.get(slot) || {}),
+    x: msg.x, y: msg.y,
+    vx: msg.vx, vy: msg.vy,
+    facing: msg.facing,
+    gravityFlipped: msg.gravityFlipped,
+    alive: msg.alive,
+    animFrame: msg.animFrame,
+    name: remotePlayers.get(slot)?.name || '?',
+  });
+}
+
+function hostAdvanceLevel() {
+  currentLevelIndex++;
+  const idx = currentLevelIndex;
+  if (idx >= levelOrder.length) {
+    if (socket) socket.emit('game:event', { type: 'level_load', levelIndex: idx });
+    showWin();
+    return;
+  }
+  if (socket) socket.emit('game:event', { type: 'level_load', levelIndex: idx });
+  loadLevel(idx).then(() => { gameState = 'playing'; });
+}
+
+function broadcastAll(msg) {
+  // Legacy shim — all events now go via socket directly
+  if (!socket) return;
+  switch (msg.type) {
+    case 'PLAYER_DIED':
+      socket.emit('game:event', { type:'player_died', slot: msg.slot, msg: msg.msg || '' });
+      break;
+    case 'PLAYER_RESPAWN':
+      socket.emit('game:event', { type:'player_respawn', slot: msg.slot, x: msg.x, y: msg.y });
+      break;
+    case 'LEVEL_LOAD':
+      socket.emit('game:event', { type:'level_load', levelIndex: msg.levelIndex });
+      break;
+    case 'PLAYER_LEFT':
+      socket.emit('room:leave');
+      break;
+  }
+}
+
+function updatePingDisplay() {
+  const el = document.getElementById('pingDisplay');
+  if (!el) return;
+  const color = myPing < 80 ? '#00ff88' : myPing < 150 ? '#ffaa00' : '#ff2222';
+  el.innerHTML = `<span style="color:${color}">●</span> ${myPing}ms`;
+}
+
+function setStatus(id, msg, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.className   = 'room-status' + (cls ? ' ' + cls : '');
+}
+
+function _setConnStatus(msg) {
+  const el = document.getElementById('voiceStatusMsg');
+  if (!el) return;
+  el.textContent = msg;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.textContent = ''; }, 5000);
+}
+
+function showConnecting(title, sub) {
+  document.getElementById('connTitle').textContent = title;
+  document.getElementById('connSub').textContent   = sub;
+  document.getElementById('connectingOverlay').classList.remove('hidden');
+}
+
+function hideConnecting() {
+  document.getElementById('connectingOverlay').classList.add('hidden');
+}
+
+function getAllPlayerStates() {
+  const all = [{ slot: myPlayerIdx, x: player.x, y: player.y, alive: player.alive, name: playerName }];
+  remotePlayers.forEach((rp, slot) => all.push({ slot, ...rp }));
+  all.sort((a,b) => a.slot - b.slot);
+  return all;
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 3 — VOICE (WebRTC audio, server-signaled)
+// ════════════════════════════════════════════════
+// ICE servers — includes free STUN + open TURN relays
+// For production, replace with your own Coturn/Twilio TURN
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  // Open TURN relay (public, rate-limited — replace for production)
+  {
+    urls:       'turn:openrelay.metered.ca:80',
+    username:   'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls:       'turn:openrelay.metered.ca:443',
+    username:   'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
+
+async function requestMedia() {
+  // Fix: navigator.mediaDevices can be undefined on mobile HTTP (needs HTTPS)
+  // or in certain browsers. Guard carefully.
+  const mediaDevices = navigator.mediaDevices ||
+    (navigator.getUserMedia && {
+      getUserMedia: (c) => new Promise((res, rej) =>
+        navigator.getUserMedia(c, res, rej))
+    });
+
+  if (!mediaDevices || !mediaDevices.getUserMedia) {
+    _setConnStatus('⚠ Mic unavailable (needs HTTPS or browser support)');
+    console.warn('[Media] getUserMedia not supported on this device/context');
+    return false;
+  }
+
+  try {
+    const stream = await mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl:  true,
+      },
+      video: false,
+    });
+    localStream = stream;
+    micEnabled  = true;
+    setupAudioAnalyser(myPlayerIdx, stream);
+    updateVoiceButtons();
+    updateLobbyVoiceTiles();
+    buildVoicePanel();
+    // Call all existing peers
+    players.forEach((p) => {
+      if (p.socketId !== mySocketId) _voiceCallPeer(p.socketId, p.slot);
+    });
+    _setConnStatus('🎙️ Mic active — others can hear you');
+    return true;
+  } catch(e) {
+    const msg = e.name === 'NotAllowedError'  ? 'Mic blocked — allow mic in browser settings' :
+                e.name === 'NotFoundError'     ? 'No microphone found on this device' :
+                e.name === 'NotSupportedError' ? 'Mic not supported (need HTTPS)' :
+                'Mic error: ' + e.message;
+    _setConnStatus('✗ ' + msg);
+    console.warn('[Media]', e.name, e.message);
+    return false;
+  }
+}
+
+async function toggleMic() {
+  if (!localStream) {
+    const ok = await requestMedia();
+    if (!ok) return;  // don't update buttons if permission denied
+  } else {
+    micEnabled = !micEnabled;
+    localStream.getAudioTracks().forEach(t => { t.enabled = micEnabled; });
+    _setConnStatus(micEnabled ? '🎙️ Mic active' : '🔇 Mic muted');
+  }
+  updateVoiceButtons();
+  updateLobbyVoiceTiles();
+  buildVoicePanel();
+}
+
+function toggleCam() { /* camera removed */ }
+
+function updateVoiceButtons() {
+  ['lobbyMicBtn','inGameMicBtn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.className   = 'vc-btn' + (micEnabled ? ' active' : ' muted');
+    btn.textContent = micEnabled ? '🎙️ MIC ON' : '🔇 MIC OFF';
+  });
+}
+
+// Create a WebRTC peer connection for voice with a remote socket
+async function _voiceCallPeer(remoteSocketId, remoteSlot) {
+  if (!localStream || peerConns.has(remoteSocketId)) return;
+
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  peerConns.set(remoteSocketId, pc);
+
+  // Add local audio tracks
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+  // ICE candidates → server → remote
+  pc.onicecandidate = ({ candidate }) => {
+    if (candidate && socket) {
+      socket.emit('voice:ice', { to: remoteSocketId, candidate });
+    }
+  };
+
+  // Remote audio track → attach
+  pc.ontrack = ({ streams }) => {
+    if (streams[0]) {
+      remoteStreams.set(remoteSlot, streams[0]);
+      setupAudioAnalyser(remoteSlot, streams[0]);
+      _playRemoteAudio(streams[0]);
+      updateLobbyVoiceTiles();
+      buildVoicePanel();
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    console.log(`[Voice] ${remoteSocketId} state:`, pc.connectionState);
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      peerConns.delete(remoteSocketId);
+    }
+  };
+
+  // Create and send offer
+  const offer = await pc.createOffer({ offerToReceiveAudio: true });
+  await pc.setLocalDescription(offer);
+  if (socket) socket.emit('voice:offer', { to: remoteSocketId, offer });
+}
+
+async function _handleVoiceOffer(fromSocketId, offer) {
+  if (peerConns.has(fromSocketId)) return; // already connected
+
+  const remotePlayer = [...players.values()].find(p => p.socketId === fromSocketId);
+  const remoteSlot   = remotePlayer ? remotePlayer.slot : -1;
+
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  peerConns.set(fromSocketId, pc);
+
+  if (localStream) {
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  }
+
+  pc.onicecandidate = ({ candidate }) => {
+    if (candidate && socket) {
+      socket.emit('voice:ice', { to: fromSocketId, candidate });
+    }
+  };
+
+  pc.ontrack = ({ streams }) => {
+    if (streams[0] && remoteSlot >= 0) {
+      remoteStreams.set(remoteSlot, streams[0]);
+      setupAudioAnalyser(remoteSlot, streams[0]);
+      _playRemoteAudio(streams[0]);
+      updateLobbyVoiceTiles();
+      buildVoicePanel();
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      peerConns.delete(fromSocketId);
+    }
+  };
+
+  await pc.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  if (socket) socket.emit('voice:answer', { to: fromSocketId, answer });
+}
+
+function _playRemoteAudio(stream) {
+  // Auto-play incoming audio via hidden element
+  const existing = document.querySelector(`audio[data-stream-id="${stream.id}"]`);
+  if (existing) return;
+  const audio      = document.createElement('audio');
+  audio.srcObject  = stream;
+  audio.autoplay   = true;
+  audio.volume     = 1;
+  audio.dataset.streamId = stream.id;
+  audio.style.display    = 'none';
+  document.body.appendChild(audio);
+}
+
+function _closePeerConn(socketId) {
+  const pc = peerConns.get(socketId);
+  if (pc) { try { pc.close(); } catch(e) {} peerConns.delete(socketId); }
+}
+
+function _closeAllPeerConns() {
+  peerConns.forEach((pc, sid) => { try { pc.close(); } catch(e) {} });
+  peerConns.clear();
+  remoteStreams.clear();
+  audioAnalysers.clear();
+}
+
+function setupAudioAnalyser(slot, stream) {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // iOS requires resume after user gesture
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    const source   = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    audioAnalysers.set(slot, analyser);
+  } catch(e) { console.warn('[Audio]', e); }
+}
+
+function isSpeaking(slot) {
+  const analyser = audioAnalysers.get(slot);
+  if (!analyser) return false;
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  const avg = data.reduce((a,b) => a+b, 0) / data.length;
+  return avg > 12;
+}
+
+// ── Voice UI ──────────────────────────────────
+function buildVoicePanel() {
+  const panel = document.getElementById('voicePanel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  panel.appendChild(createVoiceTile(myPlayerIdx, playerName, localStream, true));
+  remotePlayers.forEach((rp, slot) => {
+    panel.appendChild(createVoiceTile(slot, rp.name, remoteStreams.get(slot), false));
+  });
+}
+
+function createVoiceTile(slot, name, stream, isMe) {
+  const tile   = document.createElement('div');
+  tile.className = 'voice-tile';
+  tile.id        = `vt-${slot}`;
+
+  const avatar   = document.createElement('div');
+  avatar.className = 'vt-avatar';
+  avatar.style.background = PLAYER_COLORS[slot] || '#888';
+  avatar.style.color      = '#000';
+  avatar.style.fontFamily = 'monospace';
+  avatar.id               = `vt-avatar-${slot}`;
+  avatar.textContent      = name.substring(0, 2).toUpperCase();
+
+  const nameEl   = document.createElement('div');
+  nameEl.className = 'vt-name';
+  nameEl.textContent = isMe ? `${name} (YOU)` : name;
+
+  const micEl    = document.createElement('div');
+  micEl.className = 'vt-mic';
+  if (isMe) {
+    micEl.textContent = micEnabled ? '🎙️' : '🔇';
+    micEl.onclick  = toggleMic;
+    micEl.style.cursor = 'pointer';
+  } else {
+    micEl.textContent = stream ? '🔊' : '○';
+  }
+
+  tile.appendChild(avatar);
+  tile.appendChild(nameEl);
+  tile.appendChild(micEl);
+  return tile;
+}
+
+function updateLobbyVoiceTiles() {
+  const container = document.getElementById('lobbyVoiceTiles');
+  if (!container) return;
+  container.innerHTML = '';
+  container.appendChild(createVoiceTile(myPlayerIdx, playerName, localStream, true));
+  remotePlayers.forEach((rp, slot) => {
+    container.appendChild(createVoiceTile(slot, rp.name, remoteStreams.get(slot), false));
+  });
+}
+
+function removeVoiceTile(slot) {
+  const el = document.getElementById(`vt-${slot}`);
+  if (el) el.remove();
+  remoteStreams.delete(slot);
+  audioAnalysers.delete(slot);
+}
+
+function updateSpeakingIndicators() {
+  [myPlayerIdx, ...remotePlayers.keys()].forEach(slot => {
+    const av = document.getElementById(`vt-avatar-${slot}`);
+    if (!av) return;
+    av.classList.toggle('speaking', isSpeaking(slot));
+  });
+}
+
+// ─── STATE ────────────────────────────────────
+let canvas, ctx;
+let gameState = 'idle'; // idle | playing | dead | clear
+let currentLevelIndex = 0;
+let deathCount = 0;
+let levelDeaths = 0;
+let playerName = 'PLAYER';
+let animFrame;
+let levelStartTime = 0;
+
+// ─── PLAYER ────────────────────────────────────
+const player = {
+  x: 60, y: 0,
+  vx: 0, vy: 0,
+  onGround: false,
+  alive: true,
+  spawnX: 60, spawnY: 0,
+  // Flash on damage
+  invincible: false,
+  invTimer: 0,
+  // Animation
+  facing: 1,
+  animFrame: 0,
+  animTimer: 0,
+  // Special states
+  gravityFlipped: false,
+  controlsFlipped: false,
+};
+
+// ─── INPUT ─────────────────────────────────────
+const keys = { left: false, right: false, jump: false, jumpPressed: false };
+let touchLeft = false, touchRight = false, touchJump = false;
+let jumpConsumed = false;
+
+// ─── CAMERA ────────────────────────────────────
+const cam = { x: 0, y: 0 };
+
+// ─── WORLD OBJECTS ─────────────────────────────
+let platforms   = [];  // { x, y, w, h, type, state, ... }
+let traps       = [];  // { type, x, y, w, h, state, ... }
+let events      = [];  // { trigger, triggered, action, ... }
+let door        = { x: 0, y: 0, w: TILE, h: TILE*2, open: false };
+let key         = null; // { x, y, w, h, collected }
+let particles   = [];
+let shakeTimer  = 0;
+
+// ─── DEATH MESSAGES ────────────────────────────
+const DEATH_MSGS = [
+  "THE FLOOR IS A LIE.",
+  "TRUST NOTHING.",
+  "GRAVITY SAYS GOODBYE.",
+  "SPIKE SAYS HELLO.",
+  "MAYBE WALK SLOWER?",
+  "THE DEVIL LAUGHS.",
+  "LOOK BEFORE YOU LEAP.",
+  "CLASSIC MISTAKE.",
+  "THE CEILING HATES YOU.",
+  "YOU WERE DOING SO WELL...",
+  "WALLS HAVE FEELINGS TOO.",
+  "BOOM. GONE. BYE.",
+  "WAS THAT A TRAP? YES.",
+];
+
+// ════════════════════════════════════════════════
+//  LEVEL DEFINITIONS (JSON-driven)
+// ════════════════════════════════════════════════
+// ════════════════════════════════════════════════
+//  LEVEL LOADER — fetches from /levels/levelN.json
+//  Falls back to LEVELS_BUILTIN if fetch fails
+// ════════════════════════════════════════════════
+
+// Total number of levels (must match files in /levels/)
+const LEVEL_COUNT = 18;
+
+// Runtime level cache — populated by loadLevelData()
+const LEVELS = new Array(LEVEL_COUNT).fill(null);
+
+// Track which levels have been fetched
+const _levelFetching = new Map(); // idx → Promise
+
+/**
+ * Fetch a level JSON by index (0-based).
+ * Returns the level object. Uses cache after first load.
+ */
+async function fetchLevel(idx) {
+  if (LEVELS[idx]) return LEVELS[idx];
+  if (_levelFetching.has(idx)) return _levelFetching.get(idx);
+
+  const promise = fetch(`levels/level${idx + 1}.json`)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(data => {
+      // Normalise: convert JSON null → JS null, booleans etc. already correct
+      LEVELS[idx] = data;
+      return data;
+    })
+    .catch(err => {
+      console.warn(`[LevelLoader] Failed to load level${idx+1}.json:`, err.message);
+      // Fall back to built-in if available
+      if (LEVELS_BUILTIN[idx]) {
+        LEVELS[idx] = LEVELS_BUILTIN[idx];
+        return LEVELS[idx];
+      }
+      return null;
+    });
+
+  _levelFetching.set(idx, promise);
+  return promise;
+}
+
+/**
+ * Preload all levels in background (non-blocking).
+ * Call once on init so levels are ready when needed.
+ */
+function preloadAllLevels() {
+  for (let i = 0; i < LEVEL_COUNT; i++) {
+    fetchLevel(i); // fire and forget
+  }
+}
+
+/**
+ * Get current level data synchronously (from cache).
+ * Always use after awaiting fetchLevel(idx) or preload.
+ */
+function getLevelSync(idx) {
+  const realIdx = levelOrder.length > 0 ? levelOrder[idx] : idx;
+  return LEVELS[realIdx] || null;
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 2: LEVEL RANDOMIZER
+// ════════════════════════════════════════════════
+let levelOrder = [];
+let randomizeMode = false;
+
+function buildLevelOrder() {
+  if (randomizeMode) {
+    levelOrder = Array.from({length: LEVELS.length}, (_, i) => i);
+    for (let i = levelOrder.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [levelOrder[i], levelOrder[j]] = [levelOrder[j], levelOrder[i]];
+    }
+  } else {
+    levelOrder = Array.from({length: LEVELS.length}, (_, i) => i);
+  }
+}
+
+
+// ════════════════════════════════════════════════
+//  PLAYER STACKING PHYSICS
+//  Players act as solid platforms for each other.
+//  - Standing on top: fully solid (can stack for height)
+//  - Side collision: no push — players pass through
+//    horizontally so they don't block each other walking
+//  - Stacked player gets +PLAYER_H bonus jump height
+// ════════════════════════════════════════════════
+
+// Extra jump boost when standing on another player
+const STACK_JUMP_BONUS = -5; // added to normal JUMP_FORCE
+
+// How many frames the "standing on player" state lasts
+// after the supporting player moves away (coyote buffer)
+const STACK_COYOTE_FRAMES = 6;
+
+function resolvePlayerStacking() {
+  if (!multiMode) return;
+
+  // Build list of ALL players except self — these are the "platforms"
+  const others = [];
+  remotePlayers.forEach((rp, slot) => {
+    if (rp.alive) others.push(rp);
+  });
+  if (others.length === 0) return;
+
+  // Reset stacking state each frame
+  player._onPlayer      = false;
+  player._stackCoyote   = Math.max(0, (player._stackCoyote || 0) - 1);
+  player._stackBoostAvail = player._stackBoostAvail || false;
+
+  for (const other of others) {
+    // Only resolve vertical (top-of-head) collision — NOT horizontal.
+    // This lets players walk through each other but stand on top.
+
+    const myLeft   = player.x;
+    const myRight  = player.x + PLAYER_W;
+    const myTop    = player.y;
+    const myBot    = player.y + PLAYER_H;
+
+    const otLeft   = other.x;
+    const otRight  = other.x + PLAYER_W;
+    const otTop    = other.y;
+    const otBot    = other.y + PLAYER_H;
+
+    // Horizontal overlap needed for any vertical interaction
+    // Use a narrower overlap (60% of player width) so stacking
+    // only activates when reasonably centered, not just edge-touching
+    const xOverlap = Math.min(myRight, otRight) - Math.max(myLeft, otLeft);
+    if (xOverlap < PLAYER_W * 0.4) continue;
+
+    // --- Local player landing ON TOP of remote player ---
+    const prevBot = myBot - player.vy; // where feet were last frame
+    const landingOnTop = (
+      prevBot <= otTop + 4 &&   // was above or at their head last frame
+      myBot   >= otTop - 2 &&   // now at or below their head
+      myBot   <= otTop + 14 &&  // feet are close to their head (not deep inside)
+      player.vy >= 0             // falling or stationary (not jumping up)
+    );
+
+    if (landingOnTop && !player.gravityFlipped) {
+      // Snap feet to top of other player's head
+      player.y  = otTop - PLAYER_H;
+      player.vy = 0;
+      player.onGround      = true;
+      player._onPlayer     = true;
+      player._stackCoyote  = STACK_COYOTE_FRAMES;
+      player._stackBoostAvail = true; // bonus jump available
+
+      // Draw footprint indication
+      if (!other._headIndicator) other._headIndicator = 0;
+      other._headIndicator = 8; // frames to show indicator
+    }
+
+    // --- Local player is the platform (remote stands on us) ---
+    // This is visual only on the local client — the remote client
+    // resolves it from their own perspective. We just track it
+    // so we can show the "weight" indicator.
+    const remoteOnUs = (
+      other.vy >= 0 &&
+      Math.abs(other.y + PLAYER_H - player.y) < 10 &&
+      xOverlap >= PLAYER_W * 0.4
+    );
+    if (remoteOnUs) {
+      if (!player._beingStoodOn) player._beingStoodOn = 0;
+      player._beingStoodOn = 4; // frames
+    }
+  }
+
+  // Tick indicators
+  if (player._beingStoodOn > 0) player._beingStoodOn--;
+}
+
+// Called from updatePlayer — enhances jump when stacked
+function getStackJumpForce() {
+  // If the player just left a stack (coyote frames) or is on one,
+  // give a bonus jump height proportional to how many players are above them.
+  // Simple version: +5 velocity units when jumping off another player.
+  if ((player._onPlayer || player._stackCoyote > 0) && player._stackBoostAvail) {
+    player._stackBoostAvail = false;
+    return STACK_JUMP_BONUS; // negative = extra upward force
+  }
+  return 0;
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 3 — MULTIPLAYER ROPE SYSTEM
+// ════════════════════════════════════════════════
+function updateMultiRopes() {
+  if (!multiMode) return;
+  const chkRope = document.getElementById('chkRope');
+  if (chkRope && !chkRope.checked) return;
+
+  // Build list of all live players (local + remote)
+  const allPlayers = getAllPlayerStates();
+  if (allPlayers.length < 2) return;
+
+  // Rope connects consecutive players if within ROPE_MAX_LEN
+  // Snap if > ROPE_SNAP_LEN
+  for (let i = 0; i < allPlayers.length - 1; i++) {
+    const a = allPlayers[i];
+    const b = allPlayers[i+1];
+    if (!a.alive || !b.alive) continue;
+
+    const ax = a.x + PLAYER_W/2, ay = a.y + PLAYER_H/2;
+    const bx = b.x + PLAYER_W/2, by = b.y + PLAYER_H/2;
+    const dx = bx - ax, dy = by - ay;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    if (dist > ROPE_SNAP_LEN) {
+      // Snap — kill the farther player
+      const snapMsg = `ROPE SNAPPED! ${b.name} WAS PULLED TO THEIR DEATH.`;
+      if (b.slot === myPlayerIdx) killPlayer(snapMsg);
+      if (isHost && socket) {
+        socket.emit('game:event', { type: 'player_died', slot: b.slot, msg: snapMsg });
+      }
+    } else if (dist > ROPE_MAX_LEN) {
+      // Pull constraint — push players toward each other
+      const factor = (dist - ROPE_MAX_LEN) / dist * 0.3;
+      if (a.slot === myPlayerIdx) {
+        player.vx +=  dx * factor;
+        player.vy +=  dy * factor;
+      }
+      if (b.slot === myPlayerIdx) {
+        player.vx -= dx * factor;
+        player.vy -= dy * factor;
+      }
+    }
+  }
+}
+
+function drawMultiRopes() {
+  if (!multiMode) return;
+  const chkRope = document.getElementById('chkRope');
+  if (chkRope && !chkRope.checked) return;
+
+  const allPlayers = getAllPlayerStates();
+  if (allPlayers.length < 2) return;
+
+  for (let i = 0; i < allPlayers.length - 1; i++) {
+    const a = allPlayers[i];
+    const b = allPlayers[i+1];
+    if (!a.alive || !b.alive) continue;
+
+    const ax = a.x + PLAYER_W/2, ay = a.y + PLAYER_H/2;
+    const bx = b.x + PLAYER_W/2, by = b.y + PLAYER_H/2;
+    const dx = bx - ax, dy = by - ay;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    const taut = dist > ROPE_MAX_LEN * 0.9;
+    const danger = dist > ROPE_MAX_LEN * 1.2;
+
+    // Catenary sag
+    const segs = 12;
+    const pts = [];
+    for (let s = 0; s <= segs; s++) {
+      const t = s / segs;
+      const x = ax + dx * t;
+      // Add sag using parabola unless taut
+      const sag = taut ? 0 : Math.sin(t * Math.PI) * Math.min(40, (ROPE_MAX_LEN - dist) * 0.4);
+      const y = ay + dy * t + sag;
+      pts.push([x, y]);
+    }
+
+    ctx.save();
+    ctx.strokeStyle = danger ? '#ff2222' : taut ? '#ffaa00' : '#c8a060';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = danger ? '#ff2222' : '#c8a060';
+    ctx.shadowBlur  = taut ? 10 : 4;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let s = 1; s <= segs; s++) ctx.lineTo(pts[s][0], pts[s][1]);
+    ctx.stroke();
+
+    // Attachment rings
+    ctx.beginPath();
+    ctx.arc(ax, ay, 5, 0, Math.PI*2);
+    ctx.fillStyle = PLAYER_COLORS[a.slot] || '#c8a060';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(bx, by, 5, 0, Math.PI*2);
+    ctx.fillStyle = PLAYER_COLORS[b.slot] || '#c8a060';
+    ctx.fill();
+
+    // Distance label
+    if (dist > ROPE_MAX_LEN * 0.7) {
+      const mx = (ax+bx)/2, my = (ay+by)/2 - 14;
+      ctx.font = '8px monospace';
+      ctx.fillStyle = danger ? '#ff2222' : '#ffaa00';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${Math.round(dist)}px`, mx, my);
+      ctx.textAlign = 'left';
+    }
+    ctx.restore();
+  }
+}
+
+
+function applyRopeUpdate(msg) {
+  // Future: sync rope anchor positions
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 3 — DRAW REMOTE PLAYERS
+// ════════════════════════════════════════════════
+function drawRemotePlayers() {
+  remotePlayers.forEach((rp, slot) => {
+    if (!rp.alive) return;
+    const colorIdx = slot % PLAYER_COLORS.length;
+    drawRemotePlayer(rp, colorIdx, slot);
+  });
+}
+
+function drawRemotePlayer(rp, colorIdx, slot) {
+  const x = rp.x, y = rp.y;
+  const speaking = isSpeaking(slot);
+
+  ctx.save();
+  ctx.translate(x + PLAYER_W/2, y + PLAYER_H/2);
+  if (rp.facing === -1) ctx.scale(-1, 1);
+  if (rp.gravityFlipped)  ctx.scale(1, -1);
+
+  const hw = PLAYER_W/2, hh = PLAYER_H/2;
+
+  // Speaking glow
+  if (speaking) {
+    ctx.shadowColor = '#00ff88';
+    ctx.shadowBlur  = 16;
+  }
+
+  // "Being stood on" glow — green crown on top
+  if (rp._headIndicator > 0) {
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur  = 14;
+    rp._headIndicator--;
+  }
+
+  // Body
+  ctx.fillStyle = PLAYER_COLORS[colorIdx];
+  ctx.fillRect(-hw, -hh, PLAYER_W, PLAYER_H);
+
+  // Highlight stripe
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(-hw, -hh, PLAYER_W, 6);
+
+  // Face
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#000';
+  const eyeY = -hh + 8;
+  ctx.fillRect(-hw + 6, eyeY, 5, 5);
+  ctx.fillRect(hw - 11,  eyeY, 5, 5);
+  if (!rp.onGround) {
+    ctx.beginPath(); ctx.arc(0, eyeY+12, 4, 0, Math.PI*2); ctx.fill();
+  } else {
+    ctx.fillRect(-6, eyeY+12, 12, 3);
+  }
+
+  ctx.restore();
+
+  // Name tag
+  ctx.save();
+  ctx.font = '7px monospace';
+  ctx.fillStyle = PLAYER_COLORS[colorIdx];
+  ctx.textAlign = 'center';
+
+  // Stack indicator: show "↑" above name if being stood on
+  if (rp._headIndicator > 0) {
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText('👑', x + PLAYER_W/2, y - 28);
+    ctx.fillStyle = PLAYER_COLORS[colorIdx];
+  }
+
+  ctx.fillText(rp.name, x + PLAYER_W/2, y - 6);
+
+  if (speaking) {
+    ctx.fillStyle = '#00ff88';
+    ctx.fillText('🎙️', x + PLAYER_W/2, y - 18);
+  }
+
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+// ════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════
+function init() {
+  canvas = document.getElementById('gameCanvas');
+  ctx    = canvas.getContext('2d');
+  setupInput();
+  setupMobileControls();
+  resize();
+  window.addEventListener('resize', resize);
+  // Also handle mobile orientation changes
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => { resize(); _checkMobileControls(); }, 300);
+  });
+  if (screen.orientation) {
+    screen.orientation.addEventListener('change', () => {
+      setTimeout(() => { resize(); _checkMobileControls(); }, 300);
+    });
+  }
+  // visualViewport resize (handles iOS keyboard / PWA safe areas)
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+  }
+  buildLevelOrder();
+}
+
+function _checkMobileControls() {
+  // Show mobile controls if touch device or small screen
+  const mc = document.getElementById('mobileControls');
+  if (!mc) return;
+  const isTouch = window.matchMedia('(pointer: coarse)').matches;
+  mc.style.display = isTouch ? 'block' : '';
+}
+
+function resize() {
+  // Use visualViewport when available for accurate mobile dimensions
+  const vp = window.visualViewport;
+  const w  = vp ? vp.width  : window.innerWidth;
+  const h  = vp ? vp.height : window.innerHeight;
+  canvas.width  = Math.round(w);
+  canvas.height = Math.round(h);
+  // Force canvas to fill screen via CSS too
+  canvas.style.width  = w + 'px';
+  canvas.style.height = h + 'px';
+}
+
+// ════════════════════════════════════════════════
+//  GAME START / LEVEL LOAD
+// ════════════════════════════════════════════════
+function startGame() {
+  // Solo only — multiplayer uses launchMultiplayerGame()
+  multiMode = false;
+  deathCount = 0;
+  currentLevelIndex = 0;
+  buildLevelOrder();
+  gameState = 'playing';
+  showScreen('gameScreen');
+  resize();
+  document.getElementById('pingDisplay').style.display = 'none';
+  document.getElementById('voiceControls').style.display = 'none';
+  document.getElementById('voicePanel').innerHTML = '';
+  loadLevel(currentLevelIndex).then(() => {
+    if (animFrame) cancelAnimationFrame(animFrame);
+    animFrame = requestAnimationFrame(loop);
+  });
+}
+
+async function loadLevel(idx) {
+  const realIdx = levelOrder.length > 0 ? levelOrder[idx] : idx;
+  const lvl = await fetchLevel(realIdx);
+  if (!lvl) { showWin(); return; }
+
+  // Deep clone level data
+  platforms = lvl.platforms.map(p => ({...p}));
+  traps     = lvl.traps.map(t => ({...t}));
+  events    = lvl.events.map(e => ({...e}));
+  door      = { ...lvl.door, w: TILE, h: TILE*2, open: false };
+  key       = lvl.key ? { ...lvl.key, collected: false } : null;
+  particles = [];
+
+  // Reset player
+  player.x    = lvl.spawnX;
+  player.y    = lvl.spawnY;
+  player.vx   = 0;
+  player.vy   = 0;
+  player.alive = true;
+  player.spawnX = lvl.spawnX;
+  player.spawnY = lvl.spawnY;
+  player.gravityFlipped = false;
+  player.controlsFlipped = false;
+  player.facing = 1;
+  player.invincible = false;
+  player.onIce = false;
+  player.onConveyor = 0;
+
+  // Init piston hitboxes
+  traps.forEach(t => {
+    if (t.type === 'piston') {
+      t.hitX = t.baseX !== undefined ? t.baseX : t.x;
+      t.hitY = t.baseY !== undefined ? t.baseY : t.y;
+      t.hitW = t.w;
+      t.hitH = t.h;
+      t.extended = 0;
+    }
+    if (t.type === 'boulder' && t.state === undefined) {
+      t.state = 'waiting';
+      t.triggerDist = t.triggerDist || 200;
+      t.vx = 0;
+      t.angle = 0;
+    }
+  });
+
+  levelDeaths = 0;
+  levelStartTime = Date.now();
+  shakeTimer = 0;
+  cam.x = 0; cam.y = 0;
+
+  document.getElementById('hudLevel').textContent = `LEVEL ${lvl.id}: ${lvl.name}`;
+  document.getElementById('hudPlayer').textContent = playerName;
+  document.getElementById('hudDeaths').textContent = `💀 ${deathCount}`;
+
+  hideOverlay('deathOverlay');
+  hideOverlay('levelClearOverlay');
+  hideOverlay('winOverlay');
+
+  // Update trap icons in HUD
+  updateTrapHintHUD();
+}
+
+// ════════════════════════════════════════════════
+//  MAIN LOOP
+// ════════════════════════════════════════════════
+let _lastFrameTime = 0;
+const _FIXED_STEP = 1000 / 60; // 16.67ms
+let   _accumulator = 0;
+
+function loop(timestamp) {
+  // Guard: rAF always provides timestamp, but direct calls pass undefined
+  // Use performance.now() as fallback so delta is never NaN
+  if (!timestamp) timestamp = performance.now();
+  const delta = Math.min(timestamp - (_lastFrameTime || (timestamp - 16)), 50); // cap 50ms
+  _lastFrameTime = timestamp;
+
+  if (gameState === 'playing') {
+    _accumulator += delta;
+    // Fixed-step physics — run as many ticks as time allows (max 3)
+    let steps = 0;
+    while (_accumulator >= _FIXED_STEP && steps < 3) {
+      update();
+      _accumulator -= _FIXED_STEP;
+      steps++;
+    }
+    // Host broadcasts at ~30Hz using real elapsed time
+    if (multiMode && isHost) {
+      stateTickAccum += delta;
+      if (stateTickAccum >= STATE_TICK_MS) {
+        stateTickAccum = 0;
+        broadcastGameState();
+      }
+    }
+  }
+
+  render();
+  if (multiMode) updateSpeakingIndicators();
+  animFrame = requestAnimationFrame(loop);
+}
+
+// ════════════════════════════════════════════════
+//  UPDATE
+// ════════════════════════════════════════════════
+function update() {
+  const realIdx = levelOrder.length > 0 ? levelOrder[currentLevelIndex] : currentLevelIndex;
+  const lvl = LEVELS[realIdx];
+  if (!lvl) return;
+  const now  = Date.now();
+  const elapsed = now - levelStartTime;
+
+  // ── Camera (follow local player or centroid in MP) ──
+  updateCamera(lvl);
+
+  // ── Platform dynamics ──
+  if (!multiMode || isHost) updatePlatforms(elapsed);
+
+  // ── Traps (only host simulates authoritatively) ──
+  if (!multiMode || isHost) updateTraps();
+
+  // ── Events ──
+  if (!multiMode || isHost) processEvents(elapsed);
+
+  // ── Player ──
+  if (player.alive) {
+    updatePlayer();
+    checkPlayerCollisions(lvl);
+    checkTrapCollisions();
+    checkDoor(lvl);
+    checkKey();
+  }
+
+  // ── Player stacking (players as platforms for each other) ──
+  resolvePlayerStacking();
+
+  // ── Multiplayer rope ──
+  updateMultiRopes();
+
+  // ── Net sync ──
+  if (multiMode) {
+    sendInputToHost();
+    // (state broadcast handled by loop's fixed-step timer)
+  }
+
+  // ── Particles ──
+  updateParticles();
+  updateRope();
+
+  // ── Screen shake ──
+  if (shakeTimer > 0) shakeTimer--;
+}
+
+// ─── CAMERA ──────────────────────────────────
+function updateCamera(lvl) {
+  const cx = player.x - canvas.width / 2 + PLAYER_W / 2;
+  const maxX = lvl.width - canvas.width;
+  cam.x += (Math.max(0, Math.min(maxX, cx)) - cam.x) * 0.12;
+  cam.y = 0;
+}
+
+// ─── PLATFORMS DYNAMICS ──────────────────────
+function updatePlatforms(elapsed) {
+  platforms.forEach(p => {
+    if (p.type === 'falling') {
+      if (p.state === 'waiting' && elapsed > p.delay) {
+        p.state = 'falling';
+        p.vy    = 0;
+      }
+      if (p.state === 'falling') {
+        p.vy += GRAVITY * 0.8;
+        p.y  += p.vy;
+        if (p.y > 600) p.state = 'gone';
+      }
+    }
+    if (p.type === 'crumble' && p.state === 'crumbling') {
+      p.crumbleTimer++;
+      if (p.crumbleTimer > 30) { p.state = 'gone'; }
+    }
+    if (p.type === 'moving_platform') {
+      p._prevX = p.x;
+      if (p.dir === undefined) p.dir = 1;
+      p.x += (p.dx || 2) * p.dir;
+      if (p.x >= p.maxX) { p.x = p.maxX; p.dir = -1; }
+      if (p.x <= p.minX) { p.x = p.minX; p.dir =  1; }
+    }
+  });
+}
+
+// ─── TRAPS DYNAMICS ──────────────────────────
+function updateTraps() {
+  const now = Date.now();
+  traps.forEach(t => {
+    switch (t.type) {
+      case 'spike_moving_h':
+        t.x += t.dx * t.dir;
+        if (t.x >= t.maxX || t.x <= t.minX) t.dir *= -1;
+        break;
+
+      case 'spike_moving_v':
+        t.y += t.dy * t.dir;
+        if (t.y >= t.maxY || t.y <= t.minY) t.dir *= -1;
+        break;
+
+      case 'spike_wheel':
+        t.angle += t.speed;
+        break;
+
+      case 'ceiling_spike':
+        if (t.state === 'dropping') {
+          t.y += 6;
+          if (t.y > 450) t.state = 'gone';
+        }
+        break;
+
+      case 'wall_moving':
+        if (t.state === 'moving') {
+          t.x += t.dx;
+          if (t.dx < 0 && t.x <= t.minX) { t.x = t.minX; t.dx *= -1; }
+          if (t.dx > 0 && t.x >= t.maxX) { t.x = t.maxX; t.dx *= -1; }
+        }
+        break;
+
+      case 'saw_blade':
+        t.angle = (t.angle || 0) + (t.speed || 0.08);
+        if (t.moveX) {
+          t.x += t.dx * t.dir;
+          if (t.x >= t.maxX || t.x <= t.minX) t.dir *= -1;
+        }
+        if (t.moveY) {
+          t.y += t.dy * t.dir;
+          if (t.y >= t.maxY || t.y <= t.minY) t.dir *= -1;
+        }
+        break;
+
+      case 'lava_pool':
+        // Lava rises and falls
+        if (t.rising !== undefined) {
+          if (t.rising) {
+            t.y -= 0.4;
+            t.h += 0.4;
+            if (t.h >= t.maxH) t.rising = false;
+          } else {
+            t.y += 0.4;
+            t.h -= 0.4;
+            if (t.h <= t.minH) t.rising = true;
+          }
+        }
+        t.animOffset = (t.animOffset || 0) + 0.05;
+        break;
+
+      case 'laser':
+        // Laser blinks on/off
+        if (!t.period) t.period = 2000;
+        t.on = ((now % t.period) < t.period * 0.6);
+        break;
+
+      case 'piston':
+        // Piston extends and retracts
+        if (!t.period) t.period = 1800;
+        const pistonPhase = (now % t.period) / t.period;
+        if (pistonPhase < 0.4) {
+          // Extending
+          t.extended = Math.min(1, pistonPhase / 0.4);
+        } else if (pistonPhase < 0.6) {
+          t.extended = 1;
+        } else {
+          t.extended = Math.max(0, 1 - (pistonPhase - 0.6) / 0.4);
+        }
+        // Update effective collision box
+        if (t.dir === 'down') {
+          t.hitY = t.baseY + t.extended * t.reach;
+          t.hitH = t.h;
+        } else if (t.dir === 'up') {
+          t.hitY = t.baseY - t.extended * t.reach;
+          t.hitH = t.h;
+        } else if (t.dir === 'right') {
+          t.hitX = t.baseX + t.extended * t.reach;
+          t.hitW = t.w;
+        } else {
+          t.hitX = t.baseX - t.extended * t.reach;
+          t.hitW = t.w;
+        }
+        break;
+
+      case 'boulder':
+        if (t.state === 'rolling') {
+          t.vx = (t.vx || 0) + (t.dx > 0 ? 0.15 : -0.15);
+          t.vx = Math.max(-8, Math.min(8, t.vx));
+          t.x += t.vx;
+          t.angle = (t.angle || 0) + t.vx * 0.05;
+          if (t.x > t.maxX || t.x < t.minX) {
+            t.vx *= -0.7;
+            if (Math.abs(t.vx) < 0.5) t.vx = t.dx > 0 ? 0.5 : -0.5;
+          }
+        } else if (t.state === 'waiting') {
+          // Triggered by player proximity
+          const dist = Math.abs(player.x - (t.x + t.r));
+          if (dist < t.triggerDist) {
+            t.state = 'rolling';
+            t.vx = t.dx;
+          }
+        }
+        break;
+
+      case 'ice_floor':
+        // No movement, handled in player physics
+        break;
+
+      case 'conveyor':
+        t.animOffset = ((t.animOffset || 0) + t.speed * 0.5) % 32;
+        break;
+
+      case 'acid_drip':
+        // Acid drip falls from ceiling
+        if (!t.drops) t.drops = [];
+        if (now - (t.lastDrop || 0) > (t.interval || 1200)) {
+          t.lastDrop = now;
+          t.drops.push({ x: t.x + t.w/2 + (Math.random()-0.5)*t.w*0.6, y: t.y + t.h, vy: 2, size: 4 + Math.random()*4 });
+        }
+        for (let i = t.drops.length - 1; i >= 0; i--) {
+          t.drops[i].y += t.drops[i].vy;
+          t.drops[i].vy += 0.25;
+          if (t.drops[i].y > 600) t.drops.splice(i, 1);
+        }
+        break;
+
+      case 'fake_wall':
+      case 'fake_floor':
+        // Revealed on touch — handled in collision
+        break;
+
+      case 'electro_fence':
+        // Pulses on and off
+        if (!t.period) t.period = 800;
+        t.on = ((now % t.period) < t.period * 0.5);
+        t.animOffset = (t.animOffset || 0) + 0.15;
+        break;
+
+      case 'bounce_pad':
+        t.visualCompress = Math.max(0, (t.visualCompress || 0) - 0.08);
+        break;
+
+      // ── NEW PHASE 3 TRAPS ────────────────────────
+
+      case 'delayed_spike':
+        // Hidden until player is within popDelay ms of passing it
+        if (t.hidden && t.popDelay && player.alive) {
+          const dist = Math.abs(player.x - t.x);
+          if (dist < 60 && player.x > t.x - 80) {
+            t.hidden = false;
+            t._popTimer = t.popDelay;
+          }
+        }
+        if (!t.hidden && t._popTimer > 0) {
+          t._popTimer -= 16;
+          t._scale = 1 - (t._popTimer / (t.popDelay || 300));
+        } else if (!t.hidden) {
+          t._scale = 1;
+        }
+        break;
+
+      case 'gravity_spike':
+        // Falls when player is directly underneath
+        if (t.state === 'waiting' && player.alive) {
+          if (Math.abs((player.x + PLAYER_W/2) - (t.x + t.w/2)) < 20) {
+            t.state = 'falling';
+            t.vy = 0;
+          }
+        }
+        if (t.state === 'falling') {
+          t.vy = (t.vy || 0) + GRAVITY;
+          t.y += t.vy;
+          if (t.y > 600) t.state = 'gone';
+        }
+        break;
+
+      case 'magnetic_spike':
+        // Always rotates to face player and moves toward them
+        if (t.state === 'waiting' && player.alive) {
+          const dx = (player.x + PLAYER_W/2) - (t.x + t.w/2);
+          const dy = (player.y + PLAYER_H/2) - (t.y + t.h/2);
+          const len = Math.sqrt(dx*dx + dy*dy);
+          const spd = t.speed || 3;
+          t.x += (dx / len) * spd;
+          t.y += (dy / len) * spd;
+          t.angle = Math.atan2(dy, dx);
+        }
+        break;
+
+      case 'boomerang_arrow':
+        if (!t.state) t.state = 'forward';
+        if (t.state === 'forward') {
+          t.x += (t.speed || 5) * (t.dir || 1);
+          if (t.x > t._startX + 400 || t.x < t._startX - 400 || !t._startX) {
+            if (!t._startX) t._startX = t.x;
+            t.x += (t.speed || 5) * (t.dir || 1);
+          }
+          // After traveling 400px, reverse at double speed
+          if (t._startX && Math.abs(t.x - t._startX) >= 400) {
+            t.state = 'returning';
+            t.dir *= -1;
+            t.speed = (t.speed || 5) * 2;
+          }
+        } else if (t.state === 'returning') {
+          t.x += (t.speed || 10) * (t.dir || 1);
+          // Despawn if it returns past start
+          if (t._startX && Math.abs(t.x - t._startX) >= 50 && t.state === 'returning') {
+            // Reset
+            t.x = t._startX;
+            t.state = 'forward';
+            t.dir = t.dir * -1; // flip again
+            t.speed = (t.speed || 10) / 2; // restore original speed
+            t._startX = null;
+          }
+        }
+        break;
+
+      case 'expanding_spike':
+        // Grows 4x when player is mid-air and approaching
+        if (player.alive && !player.onGround &&
+            Math.abs(player.x - t.x) < 200 && player.vy > 0) {
+          t._scale = Math.min(4, (t._scale || 1) + 0.15);
+        } else {
+          t._scale = Math.max(1, (t._scale || 1) - 0.1);
+        }
+        break;
+
+      case 'input_inversion_zone':
+        // Flip controls when player is inside zone
+        player.controlsFlipped = !!(
+          player.alive &&
+          player.x + PLAYER_W > t.x && player.x < t.x + t.w &&
+          player.y + PLAYER_H > t.y && player.y < t.y + t.h
+        );
+        break;
+
+      case 'leap_of_faith_platform':
+        // Platform shifts right every time player has positive vx while jumping
+        if (!t.state) t.state = 'alive';
+        if (player.alive && !player.onGround && player.vx > 1) {
+          const now2 = Date.now();
+          if (!t._lastShift || now2 - t._lastShift > 200) {
+            t.x += (t.shiftPerJump || 15);
+            t._lastShift = now2;
+          }
+        }
+        break;
+
+      case 'shrinking_wall':
+        // Shrinks to crush player once they're close
+        if (!t._origH) { t._origH = t.h; t._origY = t.y; }
+        const dist2 = Math.abs(player.x - (t.x + t.w/2));
+        if (player.alive && dist2 < 200) {
+          t.h = Math.max(0, t.h - 1.5);
+          t.y = t._origY + (t._origH - t.h);
+        }
+        break;
+
+      case 'sike_goal':
+      case 'fake_exit':
+        // Draw as fake door at own position — never touch the real door object.
+        // When player gets within 50px, teleport the fake to spawn area (not the real door).
+        if (player.alive) {
+          // Init fake position from trap's own coords
+          if (t._fakeX === undefined) { t._fakeX = t.x; t._fakeY = t.y; }
+          const gx = t._fakeX + 16, gy = t._fakeY + 32;
+          const pdist = Math.sqrt((player.x - gx) ** 2 + (player.y - gy) ** 2);
+          if (pdist < 50 && !t._triggered) {
+            t._triggered = true;
+            // Move fake door far away — never touch real door
+            t._fakeX = player.spawnX + 30;
+            t._fakeY = player.spawnY - TILE * 2;
+            shakeTimer = 20;
+            spawnParticles(gx, gy, '#ff2a2a', 30);
+            setTimeout(() => { t._triggered = false; }, 3000);
+          }
+        }
+        break;
+
+      case 'fake_loading_screen':
+        // Briefly show a fake "loading" overlay that kills if player stops
+        if (t.triggerX && player.x >= t.triggerX && !t._active) {
+          t._active = true;
+          t._shownAt = Date.now();
+          // Show fake overlay
+          const fakeEl = document.getElementById('fakeLoadOverlay');
+          if (fakeEl) { fakeEl.style.display = 'flex'; }
+        }
+        if (t._active) {
+          const age = Date.now() - (t._shownAt || 0);
+          if (age > 2500) {
+            // Dismiss
+            t._active = false;
+            const fakeEl = document.getElementById('fakeLoadOverlay');
+            if (fakeEl) fakeEl.style.display = 'none';
+          }
+          // Kill player if they stop moving during fake screen
+          if (Math.abs(player.vx) < 0.5 && age > 500 && age < 2500) {
+            killPlayer("KEEP MOVING NEXT TIME.");
+          }
+        }
+        break;
+
+      case 'moving_platform':
+        if (t.dir === undefined) t.dir = 1;
+        t.x += (t.dx || 2) * t.dir;
+        if (t.x >= t.maxX) { t.x = t.maxX; t.dir = -1; }
+        if (t.x <= t.minX) { t.x = t.minX; t.dir =  1; }
+        break;
+
+      // ════ NEW LEVEL-DESIGN TRAPS ════════════════
+
+      case 'expanding_hole':
+        // Hole starts small then expands to full floor width, then fills back in
+        if (!t._phase) t._phase = 'waiting';
+        if (t._phase === 'expanding') {
+          // Expand outward from center
+          const expandSpeed = t.expandSpeed || 1.2;
+          t.x     -= expandSpeed;
+          t.w     += expandSpeed * 2;
+          t.x      = Math.max(t._minX !== undefined ? t._minX : 32, t.x);
+          t.w      = Math.min(t._maxW || 1500, t.w);
+          t.expanding = true;
+          if (t.w >= (t._maxW || 1500)) {
+            t._phase = 'full';
+            t._fullTimer = t.fullDuration || 120; // frames at full size
+          }
+        } else if (t._phase === 'full') {
+          t._fullTimer--;
+          t.expanding = true;
+          if (t._fullTimer <= 0) t._phase = 'filling';
+        } else if (t._phase === 'filling') {
+          // Fill back in from edges
+          const fillSpeed = t.fillSpeed || 0.8;
+          t.x += fillSpeed;
+          t.w -= fillSpeed * 2;
+          t.expanding = true;
+          if (t.w <= (t._origW || 64)) {
+            t.w = t._origW || 64;
+            t.x = t._origX || t.x;
+            t._phase = 'waiting';
+            t.expanding = false;
+            t._waitTimer = t.waitDuration || 180;
+          }
+        } else if (t._phase === 'waiting') {
+          t.expanding = false;
+          t._waitTimer = (t._waitTimer || 180) - 1;
+          if (t._waitTimer <= 0) t._phase = 'expanding';
+        }
+        break;
+
+      case 'shrinking_gap_platform':
+        // Platform moves away when player is jumping over the gap
+        if (!t._origX) t._origX = t.x;
+        if (player.alive && !player.onGround && player.vx > 0 &&
+            player.x > t.x - 200 && player.x < t.x + 50) {
+          t.x += t.shiftSpeed || 5;
+          t.x = Math.min(t._origX + (t.maxShift || 300), t.x);
+        }
+        // Slowly return when player is not jumping toward it
+        if (player.onGround || player.vx <= 0) {
+          t.x = Math.max(t._origX, t.x - 1);
+        }
+        break;
+
+      case 'jumpscare_spike_platform':
+        // Spikes pop up when player falls toward this platform (vy > 0, close to surface)
+        if (!t.spikesActive) t.spikesActive = false;
+        if (!t.decoyActive)  t.decoyActive  = true; // starts as safe platform
+        if (player.alive && player.vy > 2) {
+          const distY = t.y - (player.y + PLAYER_H);
+          if (distY > 0 && distY < 40 &&
+              player.x + PLAYER_W > t.x && player.x < t.x + t.w) {
+            t.spikesActive = true; // spikes pop!
+          }
+        }
+        // On second run, platform C: it slides toward player at apex then drops
+        if (t.variant === 'slide_drop' && player.alive) {
+          if (!t._state) t._state = 'waiting';
+          if (t._state === 'waiting' && player.vy < -2 &&
+              Math.abs(player.x - t.x) < 300) {
+            t._state = 'sliding';
+          }
+          if (t._state === 'sliding') {
+            // Slide toward player horizontally
+            const dx = (player.x + PLAYER_W/2) - (t.x + t.w/2);
+            t.x += Math.sign(dx) * 3;
+            // Once close, drop
+            if (Math.abs(dx) < 30) { t._state = 'dropping'; t._vy = 0; }
+          }
+          if (t._state === 'dropping') {
+            t._vy = (t._vy || 0) + GRAVITY;
+            t.y += t._vy;
+            if (t.y > 700) { t.y = t._origY || t.y; t._state = 'waiting'; t._vy = 0; }
+          }
+        }
+        if (!t._origY) t._origY = t.y;
+        break;
+
+      case 'ceiling_crusher':
+        // Drops when player is moving, resets slowly to tease retry
+        if (!t._phase) t._phase = 'idle';
+        if (t._phase === 'idle') {
+          if (player.alive && Math.abs(player.vx) > 0.5) {
+            t._phase = 'dropping';
+            t._vy = 0;
+            t._origY = t._origY || t.y;
+          }
+        }
+        if (t._phase === 'dropping') {
+          t._vy = Math.min((t._vy || 0) + 0.8, t.dropSpeed || 10);
+          t.y   += t._vy;
+          // Check if hit floor or safe notch cleared
+          if (t.y + t.h >= (t.floorY || 416)) {
+            t.y = (t.floorY || 416) - t.h;
+            t._phase = 'resting';
+            t._restTimer = 60;
+          }
+        }
+        if (t._phase === 'resting') {
+          t._restTimer--;
+          if (t._restTimer <= 0) t._phase = 'rising';
+        }
+        if (t._phase === 'rising') {
+          t.y -= t.riseSpeed || 1.5;
+          if (t.y <= t._origY) {
+            t.y = t._origY;
+            t._phase = 'idle';
+            t._vy = 0;
+          }
+        }
+        break;
+    }
+  });
+}
+
+// ─── EVENT PROCESSING ────────────────────────
+function processEvents(elapsed) {
+  events.forEach(ev => {
+    if (ev.triggered) return;
+    let fired = false;
+
+    if (ev.trigger === 'player_x' && player.x >= ev.value) fired = true;
+    if (ev.trigger === 'time'     && elapsed >= ev.value)   fired = true;
+    if (ev.trigger === 'player_y' && player.y <= ev.value)  fired = true;
+
+    if (fired) {
+      ev.triggered = true;
+      executeAction(ev);
+    }
+  });
+}
+
+function executeAction(ev) {
+  switch (ev.action) {
+    case 'open_hole':
+      if (traps[ev.trapIndex]) {
+        traps[ev.trapIndex].state = 'open';
+        spawnParticles(traps[ev.trapIndex].x, traps[ev.trapIndex].y, '#ff4400', 12);
+        shakeTimer = 8;
+      }
+      break;
+
+    case 'drop_ceiling_spike':
+      if (traps[ev.trapIndex]) {
+        traps[ev.trapIndex].state = 'dropping';
+      }
+      break;
+
+    case 'start_falling_ceiling':
+      platforms.forEach(p => {
+        if (p.type === 'falling' && p.state === 'waiting') {
+          // Kick off the delay countdown from now
+          p._startTime = Date.now();
+          p.state = 'waiting'; // stays waiting but delay now counts from trigger
+        }
+      });
+      // Actually force-start all falling platforms ignoring delay
+      platforms.forEach(p => {
+        if (p.type === 'falling' && p.state === 'waiting') {
+          p.state = 'falling';
+          p.vy = 0;
+        }
+      });
+      shakeTimer = 20;
+      break;
+
+    case 'flip_gravity':
+      player.gravityFlipped = true;
+      shakeTimer = 12;
+      spawnParticles(player.x, player.y, '#8888ff', 20);
+      break;
+
+    case 'unflip_gravity':
+      player.gravityFlipped = false;
+      shakeTimer = 8;
+      break;
+
+    case 'flip_controls':
+      player.controlsFlipped = !player.controlsFlipped;
+      break;
+  }
+}
+
+// ─── PLAYER UPDATE ────────────────────────────
+function updatePlayer() {
+  const g  = player.gravityFlipped ? -GRAVITY : GRAVITY;
+
+  // Reset per-frame flags
+  player.onIce = false;
+  player.onConveyor = 0;
+
+  // Horizontal
+  const lKey = player.controlsFlipped ? (keys.right || touchRight) : (keys.left || touchLeft);
+  const rKey = player.controlsFlipped ? (keys.left  || touchLeft)  : (keys.right || touchRight);
+  const jKey = keys.jump || touchJump;
+
+  if (player.onIce) {
+    // Ice: low friction acceleration
+    if (lKey) player.vx -= 0.6;
+    else if (rKey) player.vx += 0.6;
+    else player.vx *= 0.98;
+    player.vx = Math.max(-MOVE_SPEED * 1.5, Math.min(MOVE_SPEED * 1.5, player.vx));
+  } else {
+    if (lKey) { player.vx = -MOVE_SPEED; player.facing = -1; }
+    else if (rKey) { player.vx = MOVE_SPEED; player.facing = 1; }
+    else { player.vx *= 0.75; }
+  }
+
+  // Conveyor push
+  if (player.onConveyor !== 0) {
+    player.vx += player.onConveyor * 0.3;
+  }
+
+  // Face direction
+  if (player.vx < -0.5) player.facing = -1;
+  if (player.vx >  0.5) player.facing  = 1;
+
+  // Jump — bonus height when jumping off another player's head
+  if (jKey && !jumpConsumed && player.onGround) {
+    const stackBonus = multiMode ? getStackJumpForce() : 0;
+    player.vy = (player.gravityFlipped ? Math.abs(JUMP_FORCE) : JUMP_FORCE) + stackBonus;
+    jumpConsumed = true;
+    player.onGround = false;
+  }
+  if (!jKey) jumpConsumed = false;
+
+  // Gravity
+  player.vy += g;
+  if (Math.abs(player.vy) > 20) player.vy = Math.sign(player.vy) * 20;
+
+  player.x += player.vx;
+  player.y += player.vy;
+  player.onGround = false;
+
+  // Animation
+  player.animTimer++;
+  if (Math.abs(player.vx) > 0.5 && player.animTimer > 8) {
+    player.animFrame = (player.animFrame + 1) % 4;
+    player.animTimer = 0;
+  }
+
+  // Invincibility frames
+  if (player.invincible) {
+    player.invTimer--;
+    if (player.invTimer <= 0) player.invincible = false;
+  }
+
+  // Fall into void
+  if (player.y > 600 || player.y < -200) {
+    killPlayer("YOU FELL INTO THE VOID.");
+  }
+}
+
+// ─── PLAYER VS PLATFORMS ─────────────────────
+function checkPlayerCollisions(lvl) {
+  const lvlW = lvl.width;
+  player.x = Math.max(32, Math.min(lvlW - 32 - PLAYER_W, player.x));
+
+  // Collect open holes — these punch through solid floor collision
+  const openHoles = traps.filter(t =>
+    (t.type === 'floor_hole' && t.state === 'open') ||
+    (t.type === 'expanding_hole' && t.expanding)
+  );
+
+  platforms.forEach(p => {
+    if (p.state === 'gone' || p.state === 'crumbling') return;
+
+    // Moving platforms carry the player
+    if (p.type === 'moving_platform' && p._prevX !== undefined) {
+      const carriedX = p.x - p._prevX;
+      if (Math.abs(player.y + PLAYER_H - p.y) < 6) player.x += carriedX;
+    }
+    if (p.type === 'moving_platform') p._prevX = p.x;
+
+    if (!rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, p.x, p.y, p.w, p.h)) return;
+
+    // Floor hole: only bypass platforms that are AT the hole's y-level (the actual floor).
+    // Elevated platforms above the hole must still collide normally.
+    // Rule: skip collision only when:
+    //   1. Player center-x is inside the hole's x-range
+    //   2. The platform overlaps the hole's x-range
+    //   3. The platform's TOP is within 8px of the hole's TOP (same floor level)
+    if (p.type === 'solid' || p.type === 'ice' || p.type === 'moving_platform') {
+      for (const hole of openHoles) {
+        const playerCenterX = player.x + PLAYER_W / 2;
+        const platformIsAtFloor = Math.abs(p.y - hole.y) < 8; // same y-level as hole
+        if (platformIsAtFloor &&
+            playerCenterX > hole.x && playerCenterX < hole.x + hole.w &&
+            hole.x < p.x + p.w && hole.x + hole.w > p.x) {
+          return; // fall through — hole swallows player
+        }
+      }
+    }
+
+    const overlapX = Math.min(player.x + PLAYER_W, p.x + p.w) - Math.max(player.x, p.x);
+    const overlapY = Math.min(player.y + PLAYER_H, p.y + p.h) - Math.max(player.y, p.y);
+
+    if (overlapX < overlapY) {
+      if (player.x < p.x) player.x = p.x - PLAYER_W;
+      else                 player.x = p.x + p.w;
+      player.vx = 0;
+    } else {
+      if (player.y < p.y) {
+        player.y = p.y - PLAYER_H;
+        player.vy = 0;
+        if (!player.gravityFlipped) {
+          player.onGround = true;
+          if (p.type === 'ice') player.onIce = true;
+          if (p.type === 'crumble' && p.state === 'solid') {
+            p.state = 'crumbling';
+            p.crumbleTimer = 0;
+          }
+        }
+      } else {
+        player.y = p.y + p.h;
+        player.vy = 0;
+        if (player.gravityFlipped) {
+          player.onGround = true;
+          if (p.type === 'ice') player.onIce = true;
+          if (p.type === 'crumble' && p.state === 'solid') {
+            p.state = 'crumbling';
+            p.crumbleTimer = 0;
+          }
+        }
+      }
+    }
+  });
+}
+
+// ─── TRAP COLLISIONS ─────────────────────────
+function checkTrapCollisions() {
+  if (player.invincible) return;
+
+  traps.forEach(t => {
+    if (t.state === 'gone') return;
+
+    switch (t.type) {
+      case 'floor_hole':
+        if (t.state !== 'open') return;
+        if (player.x + PLAYER_W > t.x && player.x < t.x + t.w &&
+            player.y + PLAYER_H > t.y && player.y < t.y + t.h) {
+          killPlayer("THE FLOOR WAS A LIE.");
+        }
+        break;
+
+      case 'spike_up':
+      case 'spike_down':
+      case 'spike_moving_h':
+      case 'spike_moving_v':
+        if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8, t.x, t.y, t.w, t.h)) {
+          killPlayer(DEATH_MSGS[Math.floor(Math.random() * DEATH_MSGS.length)]);
+        }
+        break;
+
+      case 'ceiling_spike':
+        if (t.state !== 'dropping' && t.state !== 'dropped') return;
+        if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8, t.x, t.y, t.w, t.h)) {
+          killPlayer("CEILING SAYS NO.");
+        }
+        break;
+
+      case 'spike_wheel': {
+        const blades = 8;
+        for (let i = 0; i < blades; i++) {
+          const angle = t.angle + (Math.PI * 2 / blades) * i;
+          const tipX  = t.cx + Math.cos(angle) * t.r;
+          const tipY  = t.cy + Math.sin(angle) * t.r;
+          if (tipX > player.x && tipX < player.x + PLAYER_W &&
+              tipY > player.y && tipY < player.y + PLAYER_H) {
+            killPlayer("THE WHEEL WINS.");
+            return;
+          }
+        }
+        break;
+      }
+
+      case 'saw_blade': {
+        const cx = t.x + t.r, cy = t.y + t.r;
+        const px = player.x + PLAYER_W/2, py = player.y + PLAYER_H/2;
+        const dist = Math.sqrt((cx-px)**2 + (cy-py)**2);
+        if (dist < t.r + 8) {
+          killPlayer("SAW SAYS NO.");
+        }
+        break;
+      }
+
+      case 'wall_moving':
+        if (rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, t.x, t.y, t.w, t.h)) {
+          killPlayer("CRUSHED BY A WALL.");
+        }
+        break;
+
+      case 'lava_pool':
+        if (rectOverlap(player.x+2, player.y+2, PLAYER_W-4, PLAYER_H-4, t.x, t.y, t.w, t.h)) {
+          killPlayer("LAVA IS NOT A POOL.");
+        }
+        break;
+
+      case 'laser':
+        if (!t.on) return;
+        // Horizontal laser
+        if (t.axis === 'h') {
+          if (player.x + PLAYER_W > t.x && player.x < t.x + t.w &&
+              player.y + PLAYER_H > t.y - 4 && player.y < t.y + 4) {
+            killPlayer("LASER PRECISION.");
+          }
+        } else {
+          // Vertical laser
+          if (player.x + PLAYER_W > t.x - 4 && player.x < t.x + 4 &&
+              player.y + PLAYER_H > t.y && player.y < t.y + t.h) {
+            killPlayer("ZAP.");
+          }
+        }
+        break;
+
+      case 'piston': {
+        const hx = t.hitX !== undefined ? t.hitX : t.x;
+        const hy = t.hitY !== undefined ? t.hitY : t.y;
+        const hw = t.hitW !== undefined ? t.hitW : t.w;
+        const hh = t.hitH !== undefined ? t.hitH : t.h;
+        if (t.extended > 0.1 && rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, hx, hy, hw, hh)) {
+          killPlayer("PISTON TO THE FACE.");
+        }
+        break;
+      }
+
+      case 'boulder':
+        if (t.state === 'rolling') {
+          const cx = t.x + t.r, cy = t.y;
+          const px = player.x + PLAYER_W/2, py = player.y + PLAYER_H/2;
+          if (Math.sqrt((cx-px)**2 + (cy-py)**2) < t.r + 10) {
+            killPlayer("BOULDER WINS.");
+          }
+        }
+        break;
+
+      case 'ice_floor':
+        // Apply ice physics - handled in updatePlayer via flag
+        if (rectOverlap(player.x, player.y + PLAYER_H - 2, PLAYER_W, 4, t.x, t.y, t.w, t.h)) {
+          player.onIce = true;
+        }
+        break;
+
+      case 'conveyor':
+        if (rectOverlap(player.x, player.y + PLAYER_H - 2, PLAYER_W, 4, t.x, t.y, t.w, t.h)) {
+          player.onConveyor = t.speed;
+        }
+        break;
+
+      case 'acid_drip':
+        // Check drops
+        if (t.drops) {
+          t.drops.forEach(d => {
+            const dx = d.x - (player.x + PLAYER_W/2);
+            const dy = d.y - (player.y + PLAYER_H/2);
+            if (Math.sqrt(dx*dx + dy*dy) < d.size + 8) {
+              killPlayer("DISSOLVED.");
+            }
+          });
+        }
+        break;
+
+      case 'fake_wall':
+        // Player passes through — no collision
+        break;
+
+      case 'fake_floor':
+        // Collapses when stepped on
+        if (t.state !== 'solid') return;
+        if (rectOverlap(player.x, player.y + PLAYER_H - 4, PLAYER_W, 4, t.x, t.y, t.w, t.h)) {
+          t.state = 'crumbling';
+          t.crumbleTimer = 0;
+          setTimeout(() => { t.state = 'gone'; }, 400);
+        }
+        break;
+
+      case 'electro_fence':
+        if (!t.on) return;
+        if (rectOverlap(player.x+2, player.y+2, PLAYER_W-4, PLAYER_H-4, t.x, t.y, t.w, t.h)) {
+          killPlayer("ELECTROCUTED.");
+        }
+        break;
+
+      case 'bounce_pad':
+        if (rectOverlap(player.x, player.y + PLAYER_H - 4, PLAYER_W, 8, t.x, t.y, t.w, t.h)) {
+          player.vy = t.force || -18;
+          t.visualCompress = 1;
+          spawnParticles(t.x + t.w/2, t.y, '#00ffaa', 10);
+        }
+        break;
+
+      // ── NEW PHASE 3 TRAP COLLISIONS ──────────────
+
+      case 'delayed_spike':
+        if (!t.hidden && t._scale >= 0.9) {
+          const sw = (t.w || 32) * (t._scale || 1);
+          const sh = (t.h || 32) * (t._scale || 1);
+          if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8, t.x, t.y, sw, sh)) {
+            killPlayer("SURPRISE!");
+          }
+        }
+        break;
+
+      case 'gravity_spike':
+        if (t.state === 'falling') {
+          if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8, t.x, t.y, t.w||32, t.h||32)) {
+            killPlayer("GRAVITY SPIKE.");
+          }
+        }
+        break;
+
+      case 'magnetic_spike':
+        if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8, t.x, t.y, t.w||32, t.h||32)) {
+          killPlayer("ATTRACTED TO DEATH.");
+        }
+        break;
+
+      case 'boomerang_arrow':
+        if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8, t.x, t.y, t.w||24, t.h||12)) {
+          killPlayer("DIDN'T SEE THAT COMING.");
+        }
+        break;
+
+      case 'expanding_spike': {
+        const sc = t._scale || 1;
+        const ew = (t.w || 16) * sc;
+        const eh = (t.h || 16) * sc;
+        const ex = t.x - (ew - (t.w||16)) / 2;
+        const ey = t.y - (eh - (t.h||16)) / 2;
+        if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8, ex, ey, ew, eh)) {
+          killPlayer("IT GREW.");
+        }
+        break;
+      }
+
+      case 'leap_of_faith_platform':
+        // Collision as a solid platform — handled in checkPlayerCollisions via platforms array
+        // (these are in platforms[], not traps[] in well-formed levels)
+        break;
+
+      case 'shrinking_wall':
+        // If player is on the shrinking wall, crush them
+        if (t.h < 10 && player.alive) {
+          const inX = player.x + PLAYER_W > t.x && player.x < t.x + t.w;
+          const inY = player.y + PLAYER_H > t.y && player.y < t._origY + (t._origH || t.h);
+          if (inX && inY) killPlayer("CRUSHED BY SHRINKING WALL.");
+        }
+        break;
+
+      case 'fake_loading_screen':
+        // Collision handled in updateTraps
+        break;
+
+      case 'moving_platform':
+        // Solid — handled via platforms[], not traps[]
+        break;
+
+      case 'expanding_hole':
+        // Kill player who falls into the hole (already handled by checkPlayerCollisions bypass)
+        // But also kill if player y goes below floor during hole
+        if (t.expanding && player.y > 450) {
+          killPlayer("THE FLOOR DISAPPEARED.");
+        }
+        break;
+
+      case 'jumpscare_spike_platform':
+        if (t.spikesActive) {
+          // Spike hitbox covers top of platform
+          if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8,
+              t.x, t.y - 20, t.w, 24)) {
+            killPlayer("THOSE WEREN'T THERE BEFORE.");
+          }
+        }
+        // Falling platform C variant
+        if (t.variant === 'slide_drop' && t._state === 'dropping') {
+          if (rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, t.x, t.y, t.w, t.h)) {
+            killPlayer("IT DROPPED.");
+          }
+        }
+        break;
+
+      case 'ceiling_crusher':
+        if (t._phase === 'dropping' || t._phase === 'resting') {
+          // Kill unless player is in the safe notch
+          const inSafeNotch = t.safeNotchX !== undefined &&
+            player.x + PLAYER_W > t.safeNotchX &&
+            player.x < t.safeNotchX + (t.safeNotchW || 40);
+          if (!inSafeNotch &&
+              rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, t.x, t.y, t.w, t.h)) {
+            killPlayer("SQUISHED BY THE CEILING.");
+          }
+        }
+        break;
+
+      case 'shrinking_gap_platform':
+        // Falls into pit eventually
+        if (t.x > (t._origX || t.x) + (t.maxShift || 300) - 20) {
+          if (player.onGround &&
+              rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, t.x, t.y, t.w, t.h)) {
+            killPlayer("THE PLATFORM ESCAPED.");
+          }
+        }
+        break;
+    }
+  });
+
+  // Falling platforms
+  platforms.forEach(p => {
+    if (p.type !== 'falling' || p.state !== 'falling') return;
+    if (rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, p.x, p.y, p.w, p.h)) {
+      killPlayer("SQUISHED.");
+    }
+  });
+}
+
+// ─── DOOR & KEY ──────────────────────────────
+function checkDoor(lvl) {
+  const locked = lvl.door.locked && key && !key.collected;
+  if (!locked &&
+      rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, door.x, door.y, door.w, door.h)) {
+    levelClear();
+  }
+}
+
+function checkKey() {
+  if (!key || key.collected) return;
+  if (rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, key.x, key.y, key.w, key.h)) {
+    key.collected = true;
+    spawnParticles(key.x, key.y, '#ffd700', 20);
+    door.open = true;
+  }
+}
+
+// ─── KILL / RESPAWN ──────────────────────────
+function killPlayer(msg) {
+  if (!player.alive) return;
+  player.alive = false;
+  deathCount++;
+  levelDeaths++;
+  document.getElementById('hudDeaths').textContent = `💀 ${deathCount}`;
+
+  spawnParticles(player.x + PLAYER_W/2, player.y + PLAYER_H/2,
+    PLAYER_COLORS[myPlayerIdx] || '#ff2a2a', 24);
+  shakeTimer = 16;
+  gameState = 'dead';
+
+  if (multiMode && socket) {
+    // Broadcast death — this triggers ALL other players to die & restart together
+    socket.emit('game:event', {
+      type: 'player_died',
+      slot: myPlayerIdx,
+      msg:  playerName + ' DIED — RESTARTING!',
+    });
+  }
+
+  setTimeout(() => {
+    document.getElementById('deathMsg').textContent = msg;
+    document.getElementById('deathCountDisplay').textContent = deathCount;
+    showOverlay('deathOverlay');
+  }, 400);
+}
+
+function respawnPlayer() {
+  hideOverlay('deathOverlay');
+  loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
+  if (multiMode && socket) {
+    // Host broadcasts level reload to ALL so everyone restarts together
+    if (isHost) {
+      socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
+    }
+  }
+}
+
+function levelClear() {
+  gameState = 'clear';
+  spawnParticles(door.x + 16, door.y + 32, '#ffd700', 40);
+
+  const elapsed = ((Date.now() - levelStartTime) / 1000).toFixed(1);
+  const allDeaths = deathCount;
+  document.getElementById('levelStats').innerHTML =
+    `TIME: ${elapsed}s<br>DEATHS THIS LEVEL: ${levelDeaths}`;
+
+  // In multiplayer: show connected players' status
+  if (multiMode) {
+    let extra = '';
+    remotePlayers.forEach((rp, slot) => {
+      extra += `<br>${rp.name}: ${rp.alive ? '✓ ALIVE' : '💀 DEAD'}`;
+    });
+    document.getElementById('levelStats').innerHTML +=
+      `<br>─────<br>${playerName}: ✓ ALIVE${extra}`;
+
+    // Host auto-advances after short delay; clients wait
+    const btn = document.getElementById('nextLevelBtn');
+    if (btn) btn.style.display = isHost ? 'block' : 'none';
+    if (!isHost) {
+      document.getElementById('levelStats').innerHTML += '<br><br>WAITING FOR HOST...';
+    }
+
+    // Broadcast to host that we reached the door
+    if (!isHost) {
+      if (socket) socket.emit('game:event', { type: 'level_complete', levelIdx: currentLevelIndex });
+    }
+  }
+
+  setTimeout(() => showOverlay('levelClearOverlay'), 300);
+}
+
+function nextLevel() {
+  hideOverlay('levelClearOverlay');
+  if (multiMode && !isHost) return; // only host advances
+  currentLevelIndex++;
+  if (currentLevelIndex >= levelOrder.length) {
+    if (multiMode && socket) socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
+    showWin();
+  } else {
+    if (multiMode && socket) socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
+    loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
+  }
+}
+
+function showWin() {
+  gameState = 'won';
+  const el = document.getElementById('winStats');
+  if (el) {
+    if (multiMode) {
+      let txt = `You and your team conquered all levels!<br>Total deaths: ${deathCount}`;
+      remotePlayers.forEach(rp => { txt += `<br>${rp.name}: teammate`; });
+      el.innerHTML = txt;
+    } else {
+      el.textContent = `You conquered all levels! Deaths: ${deathCount}`;
+    }
+  }
+  showOverlay('winOverlay');
+}
+
+function restartGame() {
+  hideOverlay('winOverlay');
+  if (multiMode) {
+    // Return to lobby
+    buildVoicePanel();
+    showScreen('lobbyScreen');
+    return;
+  }
+  deathCount = 0;
+  currentLevelIndex = 0;
+  buildLevelOrder();
+  loadLevel(0).then(() => { gameState = 'playing'; });
+}
+
+// ─── PARTICLES ──────────────────────────────
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1 + Math.random() * 5;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 30 + Math.random() * 30,
+      maxLife: 60,
+      color,
+      size: 2 + Math.random() * 4,
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x  += p.vx;
+    p.y  += p.vy;
+    p.vy += 0.2;
+    p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+// ─── COLLISION HELPER ────────────────────────
+function rectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+// ════════════════════════════════════════════════
+//  RENDER
+// ════════════════════════════════════════════════
+function render() {
+  if (gameState === 'idle') return;
+  const realIdx = levelOrder.length > 0 ? levelOrder[currentLevelIndex] : currentLevelIndex;
+  const lvl = LEVELS[realIdx];
+  if (!lvl) return;
+
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = lvl.bgColor;
+  ctx.fillRect(0, 0, W, H);
+  drawBgGrid(lvl);
+
+  // Camera + shake
+  ctx.save();
+  if (shakeTimer > 0) {
+    ctx.translate(
+      (Math.random() - 0.5) * shakeTimer * 0.8,
+      (Math.random() - 0.5) * shakeTimer * 0.8
+    );
+  }
+  ctx.translate(-Math.round(cam.x), -Math.round(cam.y));
+
+  // Draw world
+  drawPlatforms();
+  drawTraps();
+  drawRope();
+  if (multiMode) {
+    drawRemotePlayers();
+    drawMultiRopes();
+  }
+  drawDoor(lvl);
+  drawKey();
+  drawParticles();
+  if (player.alive) drawPlayer();
+
+  ctx.restore();
+}
+
+function drawBgGrid(lvl) {
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  const gx = Math.floor(cam.x / 64) * 64;
+  for (let x = gx; x < gx + canvas.width + 64; x += 64) {
+    ctx.beginPath();
+    ctx.moveTo(x - cam.x, 0);
+    ctx.lineTo(x - cam.x, canvas.height);
+    ctx.stroke();
+  }
+  for (let y = 0; y < canvas.height; y += 64) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+}
+
+function drawPlatforms() {
+  platforms.forEach(p => {
+    if (p.state === 'gone') return;
+
+    let color = '#2a2a3a';
+    let edge  = '#4a4a6a';
+
+    if (p.type === 'crumble') {
+      if (p.state === 'crumbling') {
+        const t = p.crumbleTimer / 30;
+        color = `rgb(${Math.floor(80+t*80)}, ${Math.floor(42-t*42)}, ${Math.floor(42-t*42)})`;
+      }
+      edge = '#7a4a4a';
+    }
+    if (p.type === 'falling') {
+      color = '#3a2a1a';
+      edge  = '#6a4a2a';
+    }
+    if (p.type === 'ice') {
+      color = '#aaddff';
+      edge  = '#88ccff';
+    }
+    if (p.type === 'moving_platform') {
+      color = '#1a2a3a';
+      edge  = '#4488cc';
+    }
+    if (p.type === 'fake_floor') {
+      color = p.state === 'crumbling' ? '#3a2a1a' : '#2a2a3a';
+      edge  = p.state === 'crumbling' ? '#ff6622' : '#6a4a6a';
+    }
+    if (p.type === 'shrinking_wall') {
+      color = '#3a1a1a';
+      edge  = '#ff2222';
+    }
+
+    ctx.fillStyle = color;
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x + 1, p.y + 1, p.w - 2, p.h - 2);
+
+    // Top highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(p.x + 2, p.y + 2, p.w - 4, 3);
+
+    // Crack marks for crumble
+    if (p.type === 'crumble' && p.state === 'crumbling') {
+      ctx.strokeStyle = '#ff6622';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p.x + p.w*0.3, p.y);
+      ctx.lineTo(p.x + p.w*0.5, p.y + p.h);
+      ctx.stroke();
+    }
+  });
+}
+
+function drawTraps() {
+  traps.forEach(t => {
+    if (t.state === 'gone') return;
+
+    switch (t.type) {
+      case 'spike_up':
+        drawSpike(t.x, t.y, t.w, t.h, false);
+        break;
+      case 'spike_down':
+        drawSpike(t.x, t.y, t.w, t.h, true);
+        break;
+      case 'spike_moving_h':
+        drawSpike(t.x, t.y, t.w, t.h, false);
+        break;
+      case 'spike_moving_v':
+        drawSpike(t.x, t.y, t.w, t.h, false);
+        break;
+
+      case 'floor_hole':
+        if (t.state === 'open') {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(t.x, t.y, t.w, t.h);
+          ctx.shadowColor = '#ff4400';
+          ctx.shadowBlur  = 12;
+          ctx.strokeStyle = '#ff4400';
+          ctx.lineWidth   = 2;
+          ctx.strokeRect(t.x, t.y, t.w, t.h);
+          ctx.shadowBlur  = 0;
+        }
+        break;
+
+      case 'ceiling_spike':
+        if (t.state !== 'gone') {
+          drawSpike(t.x, t.y, t.w, t.h, true);
+        }
+        break;
+
+      case 'spike_wheel':
+        drawSpikeWheel(t);
+        break;
+
+      case 'wall_moving':
+        ctx.fillStyle = '#2a1a1a';
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeStyle = '#ff4400';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        for (let sy = t.y; sy < t.y + t.h - 20; sy += 28) {
+          drawSpike(t.x - 16, sy, 16, 16, false, true);
+        }
+        break;
+
+      // ── PHASE 2 TRAPS ─────────────────────────
+
+      case 'saw_blade':
+        drawSawBlade(t);
+        break;
+
+      case 'lava_pool':
+        drawLavaPool(t);
+        break;
+
+      case 'laser':
+        drawLaser(t);
+        break;
+
+      case 'piston':
+        drawPiston(t);
+        break;
+
+      case 'boulder':
+        drawBoulder(t);
+        break;
+
+      case 'ice_floor':
+        ctx.fillStyle = '#aaddff';
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeStyle = '#88ccff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        // Shine
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.fillRect(t.x + 4, t.y + 4, t.w - 8, 4);
+        break;
+
+      case 'conveyor': {
+        ctx.fillStyle = '#2a2a2a';
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeStyle = '#ff8800';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        // Moving arrows
+        const ao = t.animOffset || 0;
+        ctx.fillStyle = '#ff8800';
+        const arrowDir = t.speed > 0 ? 1 : -1;
+        for (let ax = t.x + (ao % 32); ax < t.x + t.w; ax += 32) {
+          ctx.beginPath();
+          if (arrowDir > 0) {
+            ctx.moveTo(ax, t.y + 4);
+            ctx.lineTo(ax + 12, t.y + t.h/2);
+            ctx.lineTo(ax, t.y + t.h - 4);
+          } else {
+            ctx.moveTo(ax + 12, t.y + 4);
+            ctx.lineTo(ax, t.y + t.h/2);
+            ctx.lineTo(ax + 12, t.y + t.h - 4);
+          }
+          ctx.closePath();
+          ctx.fill();
+        }
+        break;
+      }
+
+      case 'acid_drip':
+        // Ceiling source
+        ctx.fillStyle = '#00aa22';
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        // Drops
+        if (t.drops) {
+          t.drops.forEach(d => {
+            ctx.beginPath();
+            ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+            ctx.fillStyle = '#00ff44';
+            ctx.shadowColor = '#00ff44';
+            ctx.shadowBlur = 8;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+          });
+        }
+        break;
+
+      case 'fake_wall': {
+        // Semi-transparent wall that looks solid but isn't
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = '#2a2a3a';
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeStyle = '#4a4a6a';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(t.x+1, t.y+1, t.w-2, t.h-2);
+        ctx.globalAlpha = 1;
+        // "?" indicator
+        ctx.fillStyle = '#ffffff33';
+        ctx.font = '14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('?', t.x + t.w/2, t.y + t.h/2 + 5);
+        break;
+      }
+
+      case 'fake_floor':
+        if (t.state === 'solid' || t.state === 'crumbling') {
+          const alpha = t.state === 'crumbling' ? 0.4 : 0.7;
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = '#2a2a3a';
+          ctx.fillRect(t.x, t.y, t.w, t.h);
+          ctx.strokeStyle = t.state === 'crumbling' ? '#ff6622' : '#4a4a6a';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(t.x+1, t.y+1, t.w-2, t.h-2);
+          ctx.globalAlpha = 1;
+        }
+        break;
+
+      case 'electro_fence': {
+        if (!t.on) {
+          ctx.strokeStyle = '#334';
+          ctx.lineWidth = 3;
+          ctx.setLineDash([8,8]);
+          ctx.beginPath();
+          ctx.moveTo(t.x + t.w/2, t.y);
+          ctx.lineTo(t.x + t.w/2, t.y + t.h);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          break;
+        }
+        // ON — glowing electric fence
+        const ao2 = t.animOffset || 0;
+        ctx.strokeStyle = '#ffff00';
+        ctx.shadowColor = '#ffff00';
+        ctx.shadowBlur = 16;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(t.x + t.w/2, t.y);
+        for (let ey = t.y; ey < t.y + t.h; ey += 8) {
+          const jitter = Math.sin(ao2 + ey * 0.2) * 6;
+          ctx.lineTo(t.x + t.w/2 + jitter, ey + 8);
+        }
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        // Posts
+        ctx.fillStyle = '#888';
+        ctx.fillRect(t.x, t.y, t.w, 8);
+        ctx.fillRect(t.x, t.y + t.h - 8, t.w, 8);
+        break;
+      }
+
+      case 'bounce_pad': {
+        const compress = t.visualCompress || 0;
+        const bh = t.h * (1 - compress * 0.4);
+        ctx.fillStyle = '#00ffaa';
+        ctx.shadowColor = '#00ffaa';
+        ctx.shadowBlur = 12;
+        ctx.fillRect(t.x, t.y + (t.h - bh), t.w, bh);
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = '#00cc88';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(t.x, t.y + (t.h - bh), t.w, bh);
+        ctx.fillStyle = '#000';
+        ctx.font = '14px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('▲', t.x + t.w/2, t.y + bh/2 + 6);
+        break;
+      }
+
+      // ── NEW PHASE 3 DRAW ──────────────────────────
+
+      case 'delayed_spike': {
+        if (t.hidden) {
+          // Draw faint hint
+          ctx.globalAlpha = 0.15;
+          drawSpike(t.x, t.y, t.w||32, t.h||32, false);
+          ctx.globalAlpha = 1;
+        } else {
+          const sc = t._scale || 0;
+          ctx.save();
+          ctx.translate(t.x + (t.w||32)/2, t.y + (t.h||32)/2);
+          ctx.scale(sc, sc);
+          drawSpike(-(t.w||32)/2, -(t.h||32)/2, t.w||32, t.h||32, false);
+          ctx.restore();
+        }
+        break;
+      }
+
+      case 'gravity_spike':
+        if (t.state !== 'gone') {
+          drawSpike(t.x, t.y, t.w||32, t.h||32, true);
+          if (t.state === 'waiting') {
+            // Warning indicator
+            ctx.fillStyle = '#ff4400';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('▼', t.x + (t.w||32)/2, t.y - 4);
+          }
+        }
+        break;
+
+      case 'magnetic_spike': {
+        ctx.save();
+        ctx.translate(t.x + (t.w||32)/2, t.y + (t.h||32)/2);
+        ctx.rotate(t.angle || 0);
+        ctx.shadowColor = '#ff2222';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = '#cc2222';
+        ctx.fillRect(-(t.w||32)/2, -(t.h||32)/2, t.w||32, t.h||32);
+        ctx.strokeStyle = '#ff4444';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-(t.w||32)/2, -(t.h||32)/2, t.w||32, t.h||32);
+        ctx.shadowBlur = 0;
+        ctx.restore();
+        // Target line to player
+        ctx.strokeStyle = 'rgba(255,34,34,0.2)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4,4]);
+        ctx.beginPath();
+        ctx.moveTo(t.x + (t.w||32)/2, t.y + (t.h||32)/2);
+        ctx.lineTo(player.x + PLAYER_W/2, player.y + PLAYER_H/2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        break;
+      }
+
+      case 'boomerang_arrow': {
+        ctx.save();
+        ctx.translate(t.x + (t.w||24)/2, t.y + (t.h||12)/2);
+        if (t.dir < 0) ctx.scale(-1,1);
+        ctx.fillStyle = t.state === 'returning' ? '#ff4400' : '#cc8800';
+        ctx.shadowColor = t.state === 'returning' ? '#ff4400' : '#cc8800';
+        ctx.shadowBlur = 8;
+        // Arrow shape
+        ctx.beginPath();
+        ctx.moveTo(-(t.w||24)/2, -(t.h||12)/2);
+        ctx.lineTo((t.w||24)/2, 0);
+        ctx.lineTo(-(t.w||24)/2, (t.h||12)/2);
+        ctx.lineTo(-(t.w||24)/4, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.restore();
+        // Trail
+        ctx.strokeStyle = t.state === 'returning' ? 'rgba(255,68,0,0.3)' : 'rgba(200,136,0,0.3)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(t.x, t.y + (t.h||12)/2);
+        ctx.lineTo(t.x - (t.dir||1)*30, t.y + (t.h||12)/2);
+        ctx.stroke();
+        break;
+      }
+
+      case 'expanding_spike': {
+        const sc = t._scale || 1;
+        const ew = (t.w||16) * sc;
+        const eh = (t.h||16) * sc;
+        const ex = t.x - (ew - (t.w||16))/2;
+        const ey = t.y - (eh - (t.h||16))/2;
+        ctx.shadowColor = sc > 2 ? '#ff0000' : '#cc2222';
+        ctx.shadowBlur = sc > 2 ? 20 : 6;
+        drawSpike(ex, ey, ew, eh, false);
+        ctx.shadowBlur = 0;
+        if (sc > 1.5) {
+          ctx.fillStyle = `rgba(255,0,0,${(sc-1)/3*0.3})`;
+          ctx.fillRect(ex-4, ey-4, ew+8, eh+8);
+        }
+        break;
+      }
+
+      case 'input_inversion_zone': {
+        // Subtle zone indicator
+        ctx.fillStyle = 'rgba(200,0,200,0.06)';
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeStyle = 'rgba(200,0,200,0.25)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8,8]);
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(200,0,200,0.5)';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('↔ CONTROLS FLIPPED', t.x + t.w/2, t.y + 20);
+        break;
+      }
+
+      case 'leap_of_faith_platform': {
+        // Draw as moving platform with warning
+        ctx.fillStyle = '#2a1a3a';
+        ctx.strokeStyle = '#aa44aa';
+        ctx.lineWidth = 2;
+        ctx.fillRect(t.x, t.y, t.w||120, t.h||32);
+        ctx.strokeRect(t.x, t.y, t.w||120, t.h||32);
+        ctx.fillStyle = '#aa44aa44';
+        ctx.font = '8px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('→', t.x + (t.w||120)/2, t.y + (t.h||32)/2 + 4);
+        break;
+      }
+
+      case 'shrinking_wall': {
+        if (!t._origH) break;
+        const alpha = Math.max(0.1, t.h / t._origH);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#3a1a1a';
+        ctx.strokeStyle = '#ff2222';
+        ctx.lineWidth = 2;
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        // Warning cracks
+        ctx.strokeStyle = '#ff6622';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(t.x + t.w*0.3, t.y);
+        ctx.lineTo(t.x + t.w*0.5, t.y + t.h);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case 'sike_goal':
+      case 'fake_exit': {
+        // Draw fake door at its own tracked position (never real door coords)
+        const fx = t._fakeX !== undefined ? t._fakeX : t.x;
+        const fy = t._fakeY !== undefined ? t._fakeY : t.y;
+        ctx.fillStyle = '#1a3a1a';
+        ctx.strokeStyle = '#00ff88';
+        ctx.lineWidth = 3;
+        ctx.fillRect(fx, fy, TILE, TILE*2);
+        ctx.shadowColor = '#00ff88';
+        ctx.shadowBlur = 16;
+        ctx.strokeRect(fx, fy, TILE, TILE*2);
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.arc(fx + TILE - 8, fy + TILE, 4, 0, Math.PI*2);
+        ctx.fillStyle = '#00ff88';
+        ctx.fill();
+        break;
+      }
+
+      case 'fake_loading_screen':
+        // Visual handled by HTML overlay
+        break;
+
+      case 'expanding_hole': {
+        // Draw void hole with pulsing edge
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.005);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.shadowColor = `rgba(255,${Math.floor(pulse*100)},0,1)`;
+        ctx.shadowBlur  = 16;
+        ctx.strokeStyle = `rgba(255,${Math.floor(pulse*100)},0,1)`;
+        ctx.lineWidth   = 3;
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        ctx.shadowBlur  = 0;
+        // "FLOOR EXPANDING" warning text
+        if (t._phase === 'expanding') {
+          ctx.fillStyle = 'rgba(255,60,0,0.7)';
+          ctx.font = '9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('⚠', t.x + t.w/2, t.y - 6);
+          ctx.textAlign = 'left';
+        }
+        break;
+      }
+
+      case 'jumpscare_spike_platform': {
+        // Draw platform
+        ctx.fillStyle = t.spikesActive ? '#2a0a0a' : '#2a2a3a';
+        ctx.strokeStyle = t.spikesActive ? '#ff2222' : '#4a4a6a';
+        ctx.lineWidth = 2;
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        // Draw spikes on top if active
+        if (t.spikesActive) {
+          ctx.shadowColor = '#ff2222';
+          ctx.shadowBlur  = 8;
+          drawSpike(t.x, t.y - 18, t.w, 18, false);
+          ctx.shadowBlur  = 0;
+        } else {
+          // Looks totally normal — top highlight
+          ctx.fillStyle = 'rgba(255,255,255,0.06)';
+          ctx.fillRect(t.x + 2, t.y + 2, t.w - 4, 3);
+        }
+        break;
+      }
+
+      case 'ceiling_crusher': {
+        // Crusher block
+        const isActive = t._phase === 'dropping' || t._phase === 'resting';
+        ctx.fillStyle = isActive ? '#3a0a0a' : '#2a1a2a';
+        ctx.strokeStyle = isActive ? '#ff2222' : '#882288';
+        ctx.lineWidth = 3;
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        // Bottom spikes on crusher
+        drawSpike(t.x, t.y + t.h - 2, t.w, 18, false);
+        // Safe notch — highlighted gap
+        if (t.safeNotchX !== undefined) {
+          ctx.fillStyle = 'rgba(0,255,136,0.15)';
+          ctx.fillRect(t.safeNotchX, t.y, t.safeNotchW || 40, t.h);
+          ctx.strokeStyle = 'rgba(0,255,136,0.4)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(t.safeNotchX, t.y, t.safeNotchW || 40, t.h);
+        }
+        // Warning arrow when about to drop
+        if (t._phase === 'idle') {
+          ctx.fillStyle = 'rgba(255,100,0,0.6)';
+          ctx.font = '14px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('▼', t.x + t.w/2, t.y + t.h + 18);
+          ctx.textAlign = 'left';
+        }
+        break;
+      }
+
+      case 'shrinking_gap_platform': {
+        // Looks like normal platform but has subtle arrow suggesting it moves
+        ctx.fillStyle = '#2a2a3a';
+        ctx.strokeStyle = '#aa44aa';
+        ctx.lineWidth = 2;
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        ctx.fillRect(t.x + 2, t.y + 2, t.w - 4, 3);
+        // Subtle movement indicator
+        if (player.alive && !player.onGround && player.vx > 0) {
+          ctx.fillStyle = 'rgba(170,68,170,0.4)';
+          ctx.font = '9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('→', t.x + t.w/2, t.y - 4);
+          ctx.textAlign = 'left';
+        }
+        break;
+      }
+    }
+  });
+}
+
+// ─── PHASE 2 DRAW HELPERS ─────────────────────
+
+function drawSawBlade(t) {
+  const cx = t.x + t.r, cy = t.y + t.r;
+  const teeth = 12;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(t.angle || 0);
+
+  // Outer teeth
+  ctx.beginPath();
+  for (let i = 0; i < teeth; i++) {
+    const a1 = (Math.PI * 2 / teeth) * i;
+    const a2 = (Math.PI * 2 / teeth) * (i + 0.5);
+    const a3 = (Math.PI * 2 / teeth) * (i + 1);
+    ctx.lineTo(Math.cos(a1) * t.r, Math.sin(a1) * t.r);
+    ctx.lineTo(Math.cos(a2) * (t.r * 0.7), Math.sin(a2) * (t.r * 0.7));
+    ctx.lineTo(Math.cos(a3) * t.r, Math.sin(a3) * t.r);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#888';
+  ctx.strokeStyle = '#cc2222';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = '#ff2222';
+  ctx.shadowBlur = 8;
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Center hub
+  ctx.beginPath();
+  ctx.arc(0, 0, t.r * 0.25, 0, Math.PI*2);
+  ctx.fillStyle = '#cc2222';
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawLavaPool(t) {
+  // Base lava
+  ctx.fillStyle = '#cc3300';
+  ctx.fillRect(t.x, t.y, t.w, t.h);
+
+  // Animated surface bubbles
+  const wave = t.animOffset || 0;
+  ctx.fillStyle = '#ff5500';
+  for (let i = 0; i < Math.floor(t.w / 20); i++) {
+    const bx = t.x + i * 20 + Math.sin(wave + i) * 4;
+    const by = t.y + Math.sin(wave * 1.3 + i * 0.7) * 3;
+    ctx.beginPath();
+    ctx.arc(bx, by, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Glow
+  ctx.shadowColor = '#ff4400';
+  ctx.shadowBlur = 20;
+  ctx.strokeStyle = '#ff6600';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(t.x, t.y, t.w, t.h);
+  ctx.shadowBlur = 0;
+}
+
+function drawLaser(t) {
+  if (t.axis === 'h') {
+    // Source emitter
+    ctx.fillStyle = '#330000';
+    ctx.fillRect(t.x - 8, t.y - 6, 12, 12);
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(t.x - 6, t.y - 4, 8, 8);
+
+    if (t.on) {
+      // Laser beam
+      ctx.shadowColor = '#ff0000';
+      ctx.shadowBlur = 18;
+      ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y);
+      ctx.lineTo(t.x + t.w, t.y);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,150,150,0.5)';
+      ctx.lineWidth = 12;
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y);
+      ctx.lineTo(t.x + t.w, t.y);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    } else {
+      // Warning: dim line
+      ctx.strokeStyle = 'rgba(100,0,0,0.4)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y);
+      ctx.lineTo(t.x + t.w, t.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  } else {
+    // Vertical laser
+    ctx.fillStyle = '#330000';
+    ctx.fillRect(t.x - 6, t.y - 8, 12, 12);
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(t.x - 4, t.y - 6, 8, 8);
+
+    if (t.on) {
+      ctx.shadowColor = '#ff0000';
+      ctx.shadowBlur = 18;
+      ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y);
+      ctx.lineTo(t.x, t.y + t.h);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,150,150,0.5)';
+      ctx.lineWidth = 12;
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y);
+      ctx.lineTo(t.x, t.y + t.h);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.strokeStyle = 'rgba(100,0,0,0.4)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y);
+      ctx.lineTo(t.x, t.y + t.h);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+}
+
+function drawPiston(t) {
+  const ext = t.extended || 0;
+  ctx.fillStyle = '#333';
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 2;
+
+  if (t.dir === 'down') {
+    // Base (ceiling mount)
+    ctx.fillStyle = '#444';
+    ctx.fillRect(t.x, t.baseY, t.w, 20);
+    ctx.strokeRect(t.x, t.baseY, t.w, 20);
+    // Shaft
+    const shaftLen = ext * t.reach;
+    ctx.fillStyle = '#888';
+    ctx.fillRect(t.x + t.w*0.3, t.baseY + 20, t.w*0.4, shaftLen);
+    // Head (deadly part)
+    if (ext > 0.05) {
+      ctx.fillStyle = '#cc2222';
+      ctx.shadowColor = '#ff2222';
+      ctx.shadowBlur = ext > 0.8 ? 16 : 4;
+      ctx.fillRect(t.x, t.baseY + 20 + shaftLen, t.w, t.h);
+      ctx.strokeStyle = '#ff4444';
+      ctx.strokeRect(t.x, t.baseY + 20 + shaftLen, t.w, t.h);
+      // Spikes on head
+      drawSpike(t.x, t.baseY + 20 + shaftLen + t.h - 16, t.w, 16, false);
+      ctx.shadowBlur = 0;
+    }
+  } else if (t.dir === 'right') {
+    ctx.fillStyle = '#444';
+    ctx.fillRect(t.baseX, t.y, 20, t.h);
+    ctx.strokeRect(t.baseX, t.y, 20, t.h);
+    const shaftLen = ext * t.reach;
+    ctx.fillStyle = '#888';
+    ctx.fillRect(t.baseX + 20, t.y + t.h*0.3, shaftLen, t.h*0.4);
+    if (ext > 0.05) {
+      ctx.fillStyle = '#cc2222';
+      ctx.shadowColor = '#ff2222';
+      ctx.shadowBlur = ext > 0.8 ? 16 : 4;
+      ctx.fillRect(t.baseX + 20 + shaftLen, t.y, t.w, t.h);
+      ctx.strokeStyle = '#ff4444';
+      ctx.strokeRect(t.baseX + 20 + shaftLen, t.y, t.w, t.h);
+      ctx.shadowBlur = 0;
+    }
+  }
+}
+
+function drawBoulder(t) {
+  if (t.state === 'gone') return;
+  const cx = t.x + t.r, cy = t.y;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(t.angle || 0);
+
+  // Boulder body
+  ctx.beginPath();
+  ctx.arc(0, 0, t.r, 0, Math.PI*2);
+  ctx.fillStyle = '#6a5a4a';
+  ctx.strokeStyle = '#8a7a6a';
+  ctx.lineWidth = 3;
+  ctx.fill();
+  ctx.stroke();
+
+  // Cracks
+  ctx.strokeStyle = '#3a2a1a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-t.r*0.3, -t.r*0.2);
+  ctx.lineTo(t.r*0.2, t.r*0.3);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(t.r*0.1, -t.r*0.4);
+  ctx.lineTo(-t.r*0.3, t.r*0.1);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawSpike(x, y, w, h, flipped, sideways=false) {
+  const count = Math.max(1, Math.floor(w / 16));
+  const sw    = w / count;
+
+  ctx.fillStyle   = '#cc2222';
+  ctx.strokeStyle = '#ff4444';
+  ctx.lineWidth   = 1;
+
+  for (let i = 0; i < count; i++) {
+    ctx.beginPath();
+    if (!sideways) {
+      if (!flipped) {
+        ctx.moveTo(x + i * sw, y + h);
+        ctx.lineTo(x + i * sw + sw / 2, y);
+        ctx.lineTo(x + i * sw + sw, y + h);
+      } else {
+        ctx.moveTo(x + i * sw, y);
+        ctx.lineTo(x + i * sw + sw / 2, y + h);
+        ctx.lineTo(x + i * sw + sw, y);
+      }
+    } else {
+      ctx.moveTo(x, y + i * sw);
+      ctx.lineTo(x + w, y + i * sw + sw / 2);
+      ctx.lineTo(x, y + i * sw + sw);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawSpikeWheel(t) {
+  const blades = 8;
+  ctx.save();
+  ctx.translate(t.cx, t.cy);
+  ctx.rotate(t.angle);
+
+  // Hub
+  ctx.beginPath();
+  ctx.arc(0, 0, 10, 0, Math.PI * 2);
+  ctx.fillStyle   = '#3a1a1a';
+  ctx.strokeStyle = '#ff2222';
+  ctx.lineWidth   = 2;
+  ctx.fill();
+  ctx.stroke();
+
+  // Blades
+  for (let i = 0; i < blades; i++) {
+    const a = (Math.PI * 2 / blades) * i;
+    ctx.save();
+    ctx.rotate(a);
+    ctx.beginPath();
+    ctx.moveTo(0, -6);
+    ctx.lineTo(t.r, 0);
+    ctx.lineTo(0, 6);
+    ctx.closePath();
+    ctx.fillStyle   = '#cc2222';
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth   = 1;
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+function drawDoor(lvl) {
+  const locked = lvl.door.locked && key && !key.collected;
+  const dx = door.x, dy = door.y;
+
+  // Door frame
+  ctx.fillStyle   = locked ? '#3a1a00' : '#1a3a1a';
+  ctx.strokeStyle = locked ? '#ff8800' : '#00ff88';
+  ctx.lineWidth   = 3;
+  ctx.fillRect(dx, dy, door.w, door.h);
+  ctx.strokeRect(dx, dy, door.w, door.h);
+
+  // Door glow
+  ctx.shadowColor = locked ? '#ff8800' : '#00ff88';
+  ctx.shadowBlur  = 16;
+  ctx.strokeRect(dx, dy, door.w, door.h);
+  ctx.shadowBlur  = 0;
+
+  // Knob
+  ctx.beginPath();
+  ctx.arc(dx + door.w - 8, dy + door.h / 2, 4, 0, Math.PI * 2);
+  ctx.fillStyle = locked ? '#ff8800' : '#00ff88';
+  ctx.fill();
+
+  // Lock icon
+  if (locked) {
+    ctx.fillStyle = '#ff8800';
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🔒', dx + door.w/2, dy + door.h/2 + 6);
+  }
+}
+
+function drawKey() {
+  if (!key || key.collected) return;
+  const t = Date.now() / 400;
+  const bobY = Math.sin(t) * 4;
+
+  ctx.save();
+  ctx.translate(key.x + key.w/2, key.y + key.h/2 + bobY);
+
+  // Glow
+  ctx.shadowColor = '#ffd700';
+  ctx.shadowBlur  = 16;
+
+  // Key body
+  ctx.beginPath();
+  ctx.arc(0, -4, 8, 0, Math.PI * 2);
+  ctx.strokeStyle = '#ffd700';
+  ctx.lineWidth   = 3;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd700';
+  ctx.fillRect(-2, 0, 4, 12);
+  ctx.fillRect(-2, 4, 8, 3);
+  ctx.fillRect(-2, 8, 6, 3);
+
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    const alpha = p.life / p.maxLife;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle   = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawPlayer() {
+  const x = player.x, y = player.y;
+  const flip = player.gravityFlipped;
+
+  if (player.invincible && Math.floor(Date.now() / 80) % 2 === 0) return;
+
+  ctx.save();
+  ctx.translate(x + PLAYER_W/2, y + PLAYER_H/2);
+  if (player.facing === -1) ctx.scale(-1, 1);
+  if (flip) ctx.scale(1, -1);
+
+  const hw = PLAYER_W / 2, hh = PLAYER_H / 2;
+
+  // Speaking glow in multiplayer
+  if (multiMode && isSpeaking(myPlayerIdx)) {
+    ctx.shadowColor = '#00ff88';
+    ctx.shadowBlur  = 14;
+  }
+
+  // "Being stood on" golden glow — another player is on your head
+  if (multiMode && player._beingStoodOn > 0) {
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur  = 16;
+  }
+
+  // Body — colored by player slot in MP, white in solo
+  ctx.fillStyle = multiMode ? PLAYER_COLORS[myPlayerIdx] : '#e8e8e8';
+  ctx.fillRect(-hw, -hh, PLAYER_W, PLAYER_H);
+
+  // Highlight stripe
+  if (multiMode) {
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(-hw, -hh, PLAYER_W, 5);
+  }
+
+  ctx.shadowBlur = 0;
+
+  // Face
+  ctx.fillStyle = '#000';
+  const eyeY = -hh + 8;
+  ctx.fillRect(-hw + 6, eyeY, 5, 5);
+  ctx.fillRect(hw - 11, eyeY, 5, 5);
+
+  if (!player.onGround) {
+    ctx.beginPath();
+    ctx.arc(0, eyeY + 12, 4, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillRect(-6, eyeY + 12, 12, 3);
+  }
+
+  // Walking legs
+  if (player.onGround && Math.abs(player.vx) > 0.5) {
+    const legSwing = Math.sin(player.animFrame * Math.PI / 2) * 5;
+    ctx.fillStyle = multiMode ? PLAYER_DARK[myPlayerIdx] : '#888';
+    ctx.fillRect(-hw, hh - 8, 10, 8 + legSwing);
+    ctx.fillRect(hw - 10, hh - 8, 10, 8 - legSwing);
+  }
+
+  ctx.restore();
+
+  // Name tag in multiplayer
+  if (multiMode) {
+    ctx.save();
+    ctx.font = '7px monospace';
+    ctx.fillStyle = PLAYER_COLORS[myPlayerIdx];
+    ctx.textAlign = 'center';
+    ctx.fillText(playerName + ' (YOU)', x + PLAYER_W/2, y - 6);
+    ctx.textAlign = 'left';
+    ctx.restore();
+  }
+}
+
+// ════════════════════════════════════════════════
+//  INPUT
+// ════════════════════════════════════════════════
+function setupInput() {
+  document.addEventListener('keydown', e => {
+    // Never block input when typing in a text field
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.repeat) return;
+    switch(e.code) {
+      case 'ArrowLeft':  case 'KeyA': keys.left  = true;  e.preventDefault(); break;
+      case 'ArrowRight': case 'KeyD': keys.right = true;  e.preventDefault(); break;
+      case 'ArrowUp': case 'KeyW': case 'Space':
+        keys.jump = true;
+        keys.jumpPressed = true;
+        e.preventDefault();
+        break;
+    }
+  });
+  document.addEventListener('keyup', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    switch(e.code) {
+      case 'ArrowLeft':  case 'KeyA': keys.left  = false; break;
+      case 'ArrowRight': case 'KeyD': keys.right = false; break;
+      case 'ArrowUp': case 'KeyW': case 'Space':
+        keys.jump = false;
+        keys.jumpPressed = false;
+        break;
+    }
+  });
+
+  // Name input: Enter key to start
+  document.getElementById('playerNameInput').addEventListener('keydown', e => {
+    e.stopPropagation(); // prevent game input from consuming this
+    if (e.key === 'Enter') startGame();
+  });
+}
+
+// ─── MOBILE TOUCH CONTROLS ───────────────────
+function setupMobileControls() {
+  const btnL = document.getElementById('btnLeft');
+  const btnR = document.getElementById('btnRight');
+  const btnJ = document.getElementById('btnJump');
+
+  function addTouch(btn, onStart, onEnd) {
+    btn.addEventListener('touchstart', e => { e.preventDefault(); onStart(); btn.classList.add('pressed'); }, { passive: false });
+    btn.addEventListener('touchend',   e => { e.preventDefault(); onEnd();   btn.classList.remove('pressed'); }, { passive: false });
+    btn.addEventListener('touchcancel',e => { e.preventDefault(); onEnd();   btn.classList.remove('pressed'); }, { passive: false });
+  }
+
+  addTouch(btnL,
+    () => { touchLeft = true; },
+    () => { touchLeft = false; }
+  );
+  addTouch(btnR,
+    () => { touchRight = true; },
+    () => { touchRight = false; }
+  );
+  addTouch(btnJ,
+    () => { touchJump = true; },
+    () => { touchJump = false; }
+  );
+}
+
+// ════════════════════════════════════════════════
+//  SCREEN / OVERLAY HELPERS
+// ════════════════════════════════════════════════
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function showOverlay(id) {
+  const el = document.getElementById(id);
+  el.classList.remove('hidden');
+  el.classList.add('fade-in');
+}
+
+function hideOverlay(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+// ════════════════════════════════════════════════
+//  RANDOMIZER TOGGLE
+// ════════════════════════════════════════════════
+function toggleRandomizer() {
+  randomizeMode = !randomizeMode;
+  // Sync button (mode screen)
+  const btn = document.getElementById('randBtn');
+  if (btn) {
+    btn.textContent = `🎲 RANDOM ORDER: ${randomizeMode ? 'ON' : 'OFF'}`;
+    btn.style.borderColor = randomizeMode ? '#ffd700' : '';
+    btn.style.color       = randomizeMode ? '#ffd700' : '';
+  }
+  // Sync checkbox (lobby)
+  const chk = document.getElementById('chkRandomize');
+  if (chk) chk.checked = randomizeMode;
+}
+
+// ════════════════════════════════════════════════
+//  TRAP HINT HUD (shows current level's traps)
+// ════════════════════════════════════════════════
+const TRAP_ICONS = {
+  spike_up: '▲', spike_down: '▼', spike_moving_h: '↔▲',
+  spike_moving_v: '↕▲', spike_wheel: '⚙', floor_hole: '⬛',
+  ceiling_spike: '▼↓', wall_moving: '▐', saw_blade: '🔪',
+  lava_pool: '🔥', laser: '💥', piston: '⬇', boulder: '🪨',
+  ice_floor: '🧊', conveyor: '→', acid_drip: '💧',
+  fake_wall: '?', fake_floor: '?', electro_fence: '⚡', bounce_pad: '⬆',
+};
+
+function updateTrapHintHUD() {
+  const seen = new Set(traps.map(t => t.type));
+  const icons = [...seen].map(t => TRAP_ICONS[t] || t).join(' ');
+  const el = document.getElementById('hudTrap');
+  if (el) el.textContent = icons;
+}
+
+// ════════════════════════════════════════════════
+//  PHASE 2: ROPE SYSTEM (single-player preview)
+//  Full multiplayer rope in Phase 3 — this builds
+//  the physics foundation used in Phase 3.
+// ════════════════════════════════════════════════
+const rope = {
+  active: false,
+  anchorX: 0, anchorY: 0,  // fixed anchor (wall/ceiling)
+  length: 150,
+  snapLength: 220,          // snap if stretched beyond this
+  segments: [],             // for visual only in phase 2
+};
+
+function initRopeSegments(x1, y1, x2, y2, count) {
+  rope.segments = [];
+  for (let i = 0; i <= count; i++) {
+    const t = i / count;
+    rope.segments.push({ x: x1 + (x2-x1)*t, y: y1 + (y2-y1)*t });
+  }
+}
+
+function updateRope() {
+  if (!rope.active) return;
+  // Catenary relaxation — pull player back if rope is taut
+  const px = player.x + PLAYER_W/2;
+  const py = player.y + PLAYER_H/2;
+  const dx = px - rope.anchorX;
+  const dy = py - rope.anchorY;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+
+  if (dist > rope.snapLength) {
+    // SNAP
+    rope.active = false;
+    spawnParticles(px, py, '#ffaa00', 16);
+    killPlayer("THE ROPE SNAPPED.");
+    return;
+  }
+
+  if (dist > rope.length) {
+    // Constrain
+    const factor = (dist - rope.length) / dist;
+    player.x -= dx * factor * 0.5;
+    player.y -= dy * factor * 0.5;
+    player.vx -= dx * factor * 0.08;
+    player.vy -= dy * factor * 0.08;
+  }
+
+  // Update visual segments (simple catenary approximation)
+  const segs = rope.segments;
+  const n = segs.length;
+  if (n < 2) return;
+  segs[0].x = rope.anchorX;
+  segs[0].y = rope.anchorY;
+  segs[n-1].x = px;
+  segs[n-1].y = py;
+  // Gravity-sag relaxation
+  for (let iter = 0; iter < 5; iter++) {
+    for (let i = 1; i < n - 1; i++) {
+      segs[i].x = (segs[i-1].x + segs[i+1].x) / 2;
+      segs[i].y = (segs[i-1].y + segs[i+1].y) / 2 + 2; // gravity sag
+    }
+  }
+}
+
+function drawRope() {
+  if (!rope.active || rope.segments.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = '#c8a060';
+  ctx.lineWidth = 3;
+  ctx.shadowColor = '#c8a060';
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  ctx.moveTo(rope.segments[0].x, rope.segments[0].y);
+  for (let i = 1; i < rope.segments.length; i++) {
+    ctx.lineTo(rope.segments[i].x, rope.segments[i].y);
+  }
+  ctx.stroke();
+  // Anchor point
+  ctx.beginPath();
+  ctx.arc(rope.anchorX, rope.anchorY, 5, 0, Math.PI*2);
+  ctx.fillStyle = '#c8a060';
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+// ════════════════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════════════════
+window.addEventListener('load', init);
+</script>
+</body>
+</html>

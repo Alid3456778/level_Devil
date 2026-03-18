@@ -1,0 +1,30 @@
+{
+  "id": 2, "name": "DANCING SPIKES",
+  "bgColor": "#0d0a1a",
+  "width": 1800, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":1800, "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":1800, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1768, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":400,  "y":300, "w":200,  "h":32, "type":"solid" },
+    { "x":700,  "y":240, "w":150,  "h":32, "type":"solid" },
+    { "x":950,  "y":300, "w":200,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    { "type":"spike_moving_h", "x":300, "y":384, "w":32, "h":32, "dx":2,   "minX":200, "maxX":500, "dir":1 },
+    { "type":"spike_moving_h", "x":600, "y":384, "w":32, "h":32, "dx":2.5, "minX":550, "maxX":750, "dir":-1 },
+    { "type":"spike_moving_h", "x":850, "y":384, "w":32, "h":32, "dx":3,   "minX":800, "maxX":1000,"dir":1 },
+    { "type":"spike_up",       "x":1100,"y":384, "w":32, "h":32 },
+    { "type":"spike_up",       "x":1132,"y":384, "w":32, "h":32 },
+    { "type":"ceiling_spike",  "x":1300,"y":32,  "w":32, "h":32, "state":"up", "delay":800 },
+    { "type":"gravity_spike",  "x":1500,"y":32,  "w":32, "h":32, "state":"waiting" }
+  ],
+  "events": [
+    { "trigger":"player_x", "value":1280, "triggered":false, "action":"drop_ceiling_spike", "trapIndex":5 }
+  ],
+  "door": { "x":1720, "y":352 },
+  "key": null,
+  "gravity": 1
+}

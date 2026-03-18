@@ -1,0 +1,186 @@
+{
+  "id": 13,
+  "name": "TRUST NOTHING II",
+  "bgColor": "#0a1a1a",
+  "width": 2000,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 380,
+  "platforms": [
+    {
+      "x": 0,
+      "y": 416,
+      "w": 2000,
+      "h": 64,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 2000,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 1968,
+      "y": 0,
+      "w": 32,
+      "h": 480,
+      "type": "solid"
+    },
+    {
+      "x": 300,
+      "y": 310,
+      "w": 160,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 550,
+      "y": 240,
+      "w": 160,
+      "h": 32,
+      "type": "crumble"
+    },
+    {
+      "x": 800,
+      "y": 180,
+      "w": 160,
+      "h": 32,
+      "type": "crumble"
+    },
+    {
+      "x": 1050,
+      "y": 240,
+      "w": 160,
+      "h": 32,
+      "type": "solid"
+    },
+    {
+      "x": 1300,
+      "y": 310,
+      "w": 160,
+      "h": 32,
+      "type": "crumble"
+    }
+  ],
+  "traps": [
+    {
+      "type": "fake_wall",
+      "x": 480,
+      "y": 0,
+      "w": 32,
+      "h": 416
+    },
+    {
+      "type": "fake_wall",
+      "x": 960,
+      "y": 0,
+      "w": 32,
+      "h": 416
+    },
+    {
+      "type": "fake_floor_trap",
+      "x": 240,
+      "y": 416,
+      "w": 64,
+      "h": 64,
+      "state": "solid"
+    },
+    {
+      "type": "fake_floor_trap",
+      "x": 700,
+      "y": 416,
+      "w": 64,
+      "h": 64,
+      "state": "solid"
+    },
+    {
+      "type": "fake_floor_trap",
+      "x": 1150,
+      "y": 416,
+      "w": 64,
+      "h": 64,
+      "state": "solid"
+    },
+    {
+      "type": "electro_fence",
+      "x": 600,
+      "y": 32,
+      "w": 32,
+      "h": 384,
+      "period": 1200,
+      "animOffset": 0
+    },
+    {
+      "type": "electro_fence",
+      "x": 1100,
+      "y": 32,
+      "w": 32,
+      "h": 384,
+      "period": 1600,
+      "animOffset": 0.8
+    },
+    {
+      "type": "spike_up",
+      "x": 488,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "spike_up",
+      "x": 968,
+      "y": 384,
+      "w": 32,
+      "h": 32
+    },
+    {
+      "type": "floor_hole",
+      "x": 380,
+      "y": 416,
+      "w": 80,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    },
+    {
+      "type": "floor_hole",
+      "x": 900,
+      "y": 416,
+      "w": 80,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    }
+  ],
+  "events": [
+    {
+      "trigger": "player_x",
+      "value": 360,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 9
+    },
+    {
+      "trigger": "player_x",
+      "value": 880,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 10
+    }
+  ],
+  "door": {
+    "x": 1920,
+    "y": 352
+  },
+  "key": null,
+  "gravity": 1
+}
