@@ -1,0 +1,26 @@
+{
+  "id": 25, "name": "HUMAN BRIDGE",
+  "bgColor": "#0a1a00", "width": 2000, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":300,  "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":2000, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1968, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1700, "y":416, "w":300,  "h":64, "type":"solid" },
+    { "x":900,  "y":300, "w":200,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    { "type":"spike_up", "x":310,"y":384,"w":32,"h":32 },
+    { "type":"spike_up", "x":342,"y":384,"w":32,"h":32 },
+    { "type":"spike_up", "x":374,"y":384,"w":32,"h":32 },
+    { "type":"spike_up", "x":1650,"y":384,"w":32,"h":32 },
+    { "type":"spike_up", "x":1618,"y":384,"w":32,"h":32 },
+    { "type":"spike_moving_h","x":700,"y":384,"w":32,"h":32,"dx":3,"minX":600,"maxX":900,"dir":1 },
+    { "type":"spike_moving_h","x":1100,"y":384,"w":32,"h":32,"dx":3,"minX":1000,"maxX":1400,"dir":-1 },
+    { "type":"floor_hole","x":300,"y":416,"w":1400,"h":64,"state":"open" },
+    { "type":"saw_blade","x":1400,"y":270,"r":30,"angle":0,"speed":0.1,"moveX":true,"dx":2,"dir":-1,"minX":1200,"maxX":1650}
+  ],
+  "events": [],
+  "door": { "x":1840,"y":352 }, "key": null, "gravity": 1
+}

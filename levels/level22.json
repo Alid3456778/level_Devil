@@ -1,0 +1,29 @@
+{
+  "id": 22, "name": "SHARED OXYGEN",
+  "bgColor": "#001a1a", "width": 2200, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":2200, "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":2200, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":2168, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":300,  "y":310, "w":160,  "h":32, "type":"solid" },
+    { "x":600,  "y":240, "w":160,  "h":32, "type":"solid" },
+    { "x":900,  "y":310, "w":160,  "h":32, "type":"solid" },
+    { "x":1200, "y":240, "w":160,  "h":32, "type":"solid" },
+    { "x":1500, "y":310, "w":160,  "h":32, "type":"solid" },
+    { "x":1800, "y":240, "w":160,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    { "type":"shared_oxygen_zone", "x":0, "y":0, "w":2200, "h":480, "oxygenRadius":280, "repelRadius":36 },
+    { "type":"spike_up",  "x":500, "y":384, "w":32, "h":32 },
+    { "type":"spike_up",  "x":800, "y":384, "w":32, "h":32 },
+    { "type":"spike_up",  "x":1100,"y":384, "w":32, "h":32 },
+    { "type":"spike_up",  "x":1400,"y":384, "w":32, "h":32 },
+    { "type":"spike_moving_h","x":1600,"y":384,"w":32,"h":32,"dx":3,"minX":1500,"maxX":1800,"dir":1 },
+    { "type":"lava_pool", "x":700,  "y":395,"w":100,"h":21,"minH":15,"maxH":30,"rising":true,"animOffset":0 },
+    { "type":"lava_pool", "x":1300, "y":400,"w":100,"h":16,"minH":10,"maxH":25,"rising":false,"animOffset":1 }
+  ],
+  "events": [],
+  "door": { "x":2100,"y":352 }, "key": null, "gravity": 1
+}

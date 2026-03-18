@@ -1,36 +1,35 @@
 {
-  "id": 16,
-  "name": "FALLING CEILING",
-  "bgColor": "#1a1a0a",
-  "width": 1600,
-  "height": 480,
-  "spawnX": 60,
-  "spawnY": 380,
+  "id": 16, "name": "FALLING CEILING",
+  "bgColor": "#1a1a0a", "width": 1600, "height": 480,
+  "spawnX": 60, "spawnY": 380,
   "platforms": [
     { "x":0,    "y":416, "w":1600, "h":64, "type":"solid" },
     { "x":0,    "y":0,   "w":1600, "h":32, "type":"solid" },
     { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
-    { "x":1568, "y":0,   "w":32,   "h":480,"type":"solid" }
+    { "x":1568, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":400,  "y":330, "w":120,  "h":32, "type":"solid" },
+    { "x":700,  "y":280, "w":120,  "h":32, "type":"solid" },
+    { "x":1000, "y":330, "w":120,  "h":32, "type":"solid" },
+    { "x":1250, "y":280, "w":120,  "h":32, "type":"solid" }
   ],
   "traps": [
     {
-      "type":"ceiling_crusher",
-      "x":200, "y":32, "w":1160, "h":48,
-      "dropSpeed":10, "riseSpeed":1.5,
-      "floorY":416,
-      "safeNotchX":640,
-      "safeNotchW":44,
-      "_origY":32,
-      "_phase":"idle"
+      "type":"whole_ceiling",
+      "x":32, "y":32, "w":1536, "h":48,
+      "_origY":32, "_phase":"idle", "_speed":0,
+      "triggerOnMove":true,
+      "warnDuration":90,
+      "maxSpeed":1.5,
+      "accel":0.05,
+      "floorY":416
     },
-    { "type":"spike_up", "x":300,  "y":384, "w":32, "h":32 },
-    { "type":"spike_up", "x":500,  "y":384, "w":32, "h":32 },
-    { "type":"spike_up", "x":700,  "y":384, "w":32, "h":32 },
-    { "type":"spike_up", "x":900,  "y":384, "w":32, "h":32 },
-    { "type":"spike_up", "x":1100, "y":384, "w":32, "h":32 }
+    { "type":"spike_up", "x":200,  "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":550,  "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":850,  "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":1150, "y":384, "w":32, "h":32 },
+    { "type":"spike_up", "x":1400, "y":384, "w":32, "h":32 }
   ],
   "events": [],
   "door": { "x":1500, "y":352 },
-  "key": null,
-  "gravity": 1
+  "key": null, "gravity": 1
 }

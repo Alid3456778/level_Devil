@@ -1,0 +1,24 @@
+{
+  "id": 21, "name": "SPLIT SCREEN",
+  "bgColor": "#0a001a", "width": 1800, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":1800, "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":1800, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1768, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":200,  "y":320, "w":150,  "h":32, "type":"solid" },
+    { "x":450,  "y":250, "w":150,  "h":32, "type":"solid" },
+    { "x":1200, "y":320, "w":150,  "h":32, "type":"solid" },
+    { "x":1450, "y":250, "w":150,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    { "type":"split_wall","x":890, "y":32, "w":20, "h":448, "triggerMs":5000, "moveSpeed":2.5, "maxMove":400 },
+    { "type":"void_portal","x":1500,"y":320, "w":48, "h":48, "linkX":300, "linkY":320 },
+    { "type":"spike_up",   "x":34,  "y":384, "w":32, "h":32 },
+    { "type":"spike_up",   "x":66,  "y":384, "w":32, "h":32 },
+    { "type":"spike_moving_h","x":600,"y":384,"w":32,"h":32,"dx":3,"minX":500,"maxX":800,"dir":1 }
+  ],
+  "events": [],
+  "door": { "x":1700,"y":352 }, "key": null, "gravity": 1
+}

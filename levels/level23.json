@@ -1,0 +1,29 @@
+{
+  "id": 23, "name": "SWITCHEROO",
+  "bgColor": "#0a001a", "width": 1800, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":1800, "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":1800, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1768, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":400,  "y":310, "w":160,  "h":32, "type":"solid" },
+    { "x":800,  "y":240, "w":160,  "h":32, "type":"solid" },
+    { "x":1200, "y":310, "w":160,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    { "type":"switcheroo_lever","x":620,"y":390,"w":40,"h":26 },
+    { "type":"switcheroo_lever","x":1020,"y":390,"w":40,"h":26 },
+    { "type":"spike_up","x":200, "y":384,"w":32,"h":32 },
+    { "type":"spike_up","x":600, "y":384,"w":32,"h":32 },
+    { "type":"spike_up","x":1400,"y":384,"w":32,"h":32 },
+    { "type":"spike_moving_h","x":900,"y":210,"w":32,"h":32,"dx":3,"minX":800,"maxX":1100,"dir":1 },
+    { "type":"floor_hole","x":340,"y":416,"w":64,"h":64,"state":"closed","delay":0 },
+    { "type":"floor_hole","x":1100,"y":416,"w":64,"h":64,"state":"closed","delay":0 }
+  ],
+  "events": [
+    { "trigger":"player_x","value":320,"triggered":false,"action":"open_hole","trapIndex":6 },
+    { "trigger":"player_x","value":1080,"triggered":false,"action":"open_hole","trapIndex":7 }
+  ],
+  "door": { "x":1700,"y":352 }, "key": null, "gravity": 1
+}

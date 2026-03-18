@@ -1,0 +1,27 @@
+{
+  "id": 19, "name": "BUDDY SYSTEM",
+  "bgColor": "#0a0a1a", "width": 2000, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":400,  "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":2000, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1968, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1400, "y":416, "w":600,  "h":64, "type":"solid" },
+    { "x":500,  "y":300, "w":120,  "h":32, "type":"solid" },
+    { "x":1200, "y":300, "w":120,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    { "type":"pressure_button", "x":160, "y":400, "w":60, "h":16, "group":"main", "id":"btnA" },
+    { "type":"pressure_button", "x":1780,"y":400, "w":60, "h":16, "group":"main", "id":"btnB" },
+    { "type":"buddy_door", "x":420, "y":352, "w":32, "h":64, "group":"main" },
+    { "type":"buddy_door", "x":1350,"y":352, "w":32, "h":64, "group":"main" },
+    { "type":"buddy_floor","x":420, "y":416, "w":980,"h":64, "group":"main", "collapseDelay":120,"collapseType":"pit" },
+    { "type":"buddy_floor","x":420, "y":416, "w":490,"h":64, "group":"main", "collapseType":"spike","_phase":"solid" },
+    { "type":"spike_up",   "x":600, "y":384, "w":32, "h":32 },
+    { "type":"spike_up",   "x":900, "y":384, "w":32, "h":32 },
+    { "type":"spike_up",   "x":1100,"y":384, "w":32, "h":32 }
+  ],
+  "events": [],
+  "door": { "x":1900, "y":352 }, "key": null, "gravity": 1
+}

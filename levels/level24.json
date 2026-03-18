@@ -1,0 +1,29 @@
+{
+  "id": 24, "name": "TUG OF WAR",
+  "bgColor": "#1a0a00", "width": 1800, "height": 480,
+  "spawnX": 60, "spawnY": 380,
+  "platforms": [
+    { "x":0,    "y":416, "w":1800, "h":64, "type":"solid" },
+    { "x":0,    "y":0,   "w":1800, "h":32, "type":"solid" },
+    { "x":0,    "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":1768, "y":0,   "w":32,   "h":480,"type":"solid" },
+    { "x":300,  "y":300, "w":160,  "h":32, "type":"solid" },
+    { "x":700,  "y":220, "w":160,  "h":32, "type":"solid" },
+    { "x":1100, "y":300, "w":160,  "h":32, "type":"solid" },
+    { "x":1400, "y":220, "w":160,  "h":32, "type":"solid" }
+  ],
+  "traps": [
+    { "type":"tug_rope_anchor","x":860,"y":416,"w":32,"h":32 },
+    { "type":"spike_up",  "x":500, "y":384,"w":32,"h":32 },
+    { "type":"spike_up",  "x":900, "y":384,"w":32,"h":32 },
+    { "type":"spike_up",  "x":1250,"y":384,"w":32,"h":32 },
+    { "type":"spike_moving_h","x":600,"y":384,"w":32,"h":32,"dx":4,"minX":500,"maxX":850,"dir":1 },
+    { "type":"spike_moving_h","x":950,"y":384,"w":32,"h":32,"dx":4,"minX":900,"maxX":1200,"dir":-1 },
+    { "type":"spike_wheel","x":700,"y":180,"cx":716,"cy":196,"r":50,"angle":0,"speed":0.08 },
+    { "type":"lava_pool","x":1550,"y":395,"w":160,"h":21,"minH":15,"maxH":40,"rising":true,"animOffset":0 }
+  ],
+  "events": [],
+  "door": { "x":1700,"y":352, "locked":true },
+  "key":  { "x":720, "y":192, "w":28, "h":28, "collected":false },
+  "gravity": 1
+}
