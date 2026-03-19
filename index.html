@@ -323,10 +323,10 @@
     padding-left:   var(--safe-left);
     padding-right:  var(--safe-right);
   }
-  .mobile-btn {
+   .mobile-btn {
     position: absolute;
     /* Pixel-art dark button like Level Devil reference */
-    background: #1a1a1a;
+    background: #73737313;
     border: 3px solid #444;
     border-bottom: 5px solid #222;
     border-right: 4px solid #111;
@@ -348,7 +348,7 @@
   .mobile-btn:active, .mobile-btn.pressed {
     transform: translateY(3px);
     box-shadow: 0 1px 0 rgba(0,0,0,0.5);
-    background: #2a2a2a;
+    background: transparent;
     border-color: #ff8800;
   }
   #btnLeft  {
@@ -894,8 +894,12 @@
 
   <!-- ═══ UNIFIED TOP BAR ═══ -->
   <div id="topBar">
-    <!-- Left: level + deaths -->
+    <!-- Left: leave btn + level name + deaths -->
     <div id="hudLeft">
+      <button class="top-btn" id="btnLeaveGame" onclick="leaveToModeSelect()"
+              title="Back to mode select" style="color:#ffaa44;border-color:#ffaa4444;">
+        ◀
+      </button>
       <span class="hud-item level-info" id="hudLevel">LVL 1</span>
       <span class="hud-item death-count" id="hudDeaths">💀 0</span>
     </div>
@@ -1603,6 +1607,16 @@ function leaveLobby() {
   showScreen('roomScreen');
 }
 
+function leaveToModeSelect() {
+  // Stop game loop and music, return to mode select screen
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  AUDIO.stopBg();
+  AUDIO._bgFile = null;
+  gameState = 'idle';
+  multiMode = false;
+  showScreen('modeScreen');
+}
+
 function leaveGame() {
   if (socket) socket.emit('room:leave');
   players.clear();
@@ -2276,77 +2290,84 @@ const STACK_COYOTE_FRAMES = 6;
 function resolvePlayerStacking() {
   if (!multiMode) return;
 
-  // Build list of ALL players except self — these are the "platforms"
   const others = [];
-  remotePlayers.forEach((rp, slot) => {
-    if (rp.alive) others.push(rp);
-  });
-  if (others.length === 0) return;
+  remotePlayers.forEach((rp, slot) => { if (rp.alive) others.push(rp); });
+  if (others.length === 0) {
+    player._stackCount = 0;
+    if (player._beingStoodOn > 0) player._beingStoodOn--;
+    return;
+  }
 
-  // Reset stacking state each frame
+  // Reset per-frame stacking state
   player._onPlayer      = false;
   player._stackCoyote   = Math.max(0, (player._stackCoyote || 0) - 1);
   player._stackBoostAvail = player._stackBoostAvail || false;
+  player._stackCount    = player._stackCount || 0;
+  // Count how many players are above us this frame
+  let playersAbove = 0;
 
   for (const other of others) {
-    // Only resolve vertical (top-of-head) collision — NOT horizontal.
-    // This lets players walk through each other but stand on top.
+    const myLeft = player.x,   myRight = player.x + PLAYER_W;
+    const myTop  = player.y,   myBot   = player.y + PLAYER_H;
+    const otLeft = other.x,    otRight = other.x + PLAYER_W;
+    const otTop  = other.y,    otBot   = other.y + PLAYER_H;
 
-    const myLeft   = player.x;
-    const myRight  = player.x + PLAYER_W;
-    const myTop    = player.y;
-    const myBot    = player.y + PLAYER_H;
-
-    const otLeft   = other.x;
-    const otRight  = other.x + PLAYER_W;
-    const otTop    = other.y;
-    const otBot    = other.y + PLAYER_H;
-
-    // Horizontal overlap needed for any vertical interaction
-    // Use a narrower overlap (60% of player width) so stacking
-    // only activates when reasonably centered, not just edge-touching
     const xOverlap = Math.min(myRight, otRight) - Math.max(myLeft, otLeft);
     if (xOverlap < PLAYER_W * 0.4) continue;
 
-    // --- Local player landing ON TOP of remote player ---
-    const prevBot = myBot - player.vy; // where feet were last frame
+    // ── Landing ON TOP of other player ──────────────────────────
+    const prevBot    = myBot - player.vy;
     const landingOnTop = (
-      prevBot <= otTop + 4 &&   // was above or at their head last frame
-      myBot   >= otTop - 2 &&   // now at or below their head
-      myBot   <= otTop + 14 &&  // feet are close to their head (not deep inside)
-      player.vy >= 0             // falling or stationary (not jumping up)
+      prevBot <= otTop + 4 &&
+      myBot   >= otTop - 2 &&
+      myBot   <= otTop + 14 &&
+      player.vy >= 0
     );
 
     if (landingOnTop && !player.gravityFlipped) {
-      // Snap feet to top of other player's head
       player.y  = otTop - PLAYER_H;
       player.vy = 0;
       player.onGround      = true;
       player._onPlayer     = true;
       player._stackCoyote  = STACK_COYOTE_FRAMES;
-      player._stackBoostAvail = true; // bonus jump available
+      player._stackBoostAvail = true;
+      other._headIndicator = 8;
 
-      // Draw footprint indication
-      if (!other._headIndicator) other._headIndicator = 0;
-      other._headIndicator = 8; // frames to show indicator
+      // ── CARRY: when standing on someone, inherit their horizontal movement ──
+      // The upper player moves WITH the lower player automatically
+      if (other.vx !== undefined) {
+        // Only apply carry if the upper player isn't actively moving themselves
+        const lKey = player.controlsFlipped ? (keys.right || touchRight) : (keys.left  || touchLeft);
+        const rKey = player.controlsFlipped ? (keys.left  || touchLeft)  : (keys.right || touchRight);
+        if (!lKey && !rKey) {
+          // Passively ride the bottom player
+          player.x += (other.vx || 0);
+        }
+      }
     }
 
-    // --- Local player is the platform (remote stands on us) ---
-    // This is visual only on the local client — the remote client
-    // resolves it from their own perspective. We just track it
-    // so we can show the "weight" indicator.
+    // ── Remote player standing ON US → track weight ──────────────
     const remoteOnUs = (
-      other.vy >= 0 &&
-      Math.abs(other.y + PLAYER_H - player.y) < 10 &&
+      other.vy !== undefined && other.vy >= 0 &&
+      Math.abs(other.y + PLAYER_H - player.y) < 12 &&
       xOverlap >= PLAYER_W * 0.4
     );
     if (remoteOnUs) {
-      if (!player._beingStoodOn) player._beingStoodOn = 0;
-      player._beingStoodOn = 4; // frames
+      player._beingStoodOn = 4;
+      playersAbove++;
     }
   }
 
-  // Tick indicators
+  // ── Speed penalty for bottom player based on stack weight ─────
+  // Each extra player reduces move speed by 15%, max 60% reduction
+  player._stackCount = playersAbove;
+  if (playersAbove > 0) {
+    const speedMult = Math.max(0.4, 1 - playersAbove * 0.15);
+    player._stackSpeedMult = speedMult;
+  } else {
+    player._stackSpeedMult = 1;
+  }
+
   if (player._beingStoodOn > 0) player._beingStoodOn--;
 }
 
@@ -3613,6 +3634,149 @@ function updateTraps() {
         // 'crushed' is terminal — level cannot be completed, stays crushed
         break;
 
+      // ════ FEATURE 2: ADVANCED HOLES ═════════════
+
+      case 'smart_hole':
+        // 4 sub-modes: expand/contract, chase, fake, invisible
+        if (!t._origX) { t._origX = t.x; t._origW = t.w; }
+
+        // A) Expand/contract as per JSON cycle
+        if (t.expandCycle) {
+          const period = t.expandCycle * 60;
+          const phase  = (Date.now() / 1000 * 60) % period;
+          const ratio  = Math.sin((phase / period) * Math.PI * 2) * 0.5 + 0.5;
+          t.w = t._origW + (t.maxExpand || 64) * ratio;
+          t.x = t._origX - (t.w - t._origW) * 0.5; // expand from center
+          t.state = 'open';
+        }
+
+        // B) Chase player — if player jumps over hole, hole slides toward them
+        if (t.chase && player.alive) {
+          const hCX = t.x + t.w / 2;
+          const pCX = player.x + PLAYER_W / 2;
+          const above = player.y + PLAYER_H <= t.y + 8;
+          if (above && Math.abs(pCX - hCX) < 300) {
+            const speed = t.chaseSpeed || 2;
+            t.x += Math.sign(pCX - hCX) * speed;
+            // Stay inside level bounds
+            t.x = Math.max(33, Math.min(2000, t.x));
+          }
+          t.state = 'open';
+        }
+
+        // C) Invisible hole — no visual, but still kills
+        // (draw function checks t.invisible flag)
+
+        // D) Fake hole — visible but harmless (draw shows it, collision skips)
+        // (collision checks t.fake flag)
+        break;
+
+      // ════ FEATURE 3: INTERACTIVE SPIKES ══════════
+
+      case 'chasing_spike':
+        // Spike slides toward player when they jump over it
+        if (!t._origX) t._origX = t.x;
+        if (player.alive && !player.onGround && player.vy > -4) {
+          // Player is rising or falling (committed to a jump)
+          const pCX = player.x + PLAYER_W / 2;
+          const sCX = t.x + (t.w || 32) / 2;
+          const dist = Math.abs(pCX - sCX);
+          if (dist < (t.triggerRange || 200)) {
+            const speed = t.slideSpeed || 3;
+            t.x += Math.sign(pCX - sCX) * speed;
+            t.x = Math.max(t.minX || 33, Math.min(t.maxX || 2000, t.x));
+          }
+        } else if (player.onGround) {
+          // Slowly return to origin when player on ground
+          if (t._origX !== undefined) {
+            t.x += (t._origX - t.x) * 0.04;
+          }
+        }
+        break;
+
+      // ════ FEATURE 4: PILLARS ══════════════════════
+
+      case 'pillar':
+        if (!t._phase) t._phase = 'hidden';
+        if (!t._origH) { t._origH = t.h; t._origY = t.y; }
+        if (!t._curH)  t._curH = 0;
+
+        // Trigger: player is within triggerRange horizontally
+        const pDist = Math.abs((player.x + PLAYER_W/2) - (t.x + t.w/2));
+        const tRange = t.triggerRange || 180;
+
+        if (t._phase === 'hidden') {
+          t._curH = 0;
+          t.y     = t._origY + t._origH; // fully retracted below floor
+          if (player.alive && pDist < tRange) {
+            t._phase  = 'rising';
+            t._speed  = 0;
+          }
+        }
+        if (t._phase === 'rising') {
+          const riseSpeed = t.riseSpeed || 4;
+          t._curH = Math.min(t._origH, t._curH + riseSpeed);
+          t.y     = t._origY + (t._origH - t._curH);
+          t.h     = t._curH;
+          if (t._curH >= t._origH) {
+            t._phase     = 'extended';
+            t._holdTimer = t.holdTime || 120;
+          }
+        }
+        if (t._phase === 'extended') {
+          // Optionally move sideways — push player toward a trap
+          if (t.pushDir) {
+            t.x += (t.pushSpeed || 1.5) * t.pushDir;
+            const bounded = (t.pushDir > 0) ? t.x >= (t.maxX || t._origX + 200)
+                                             : t.x <= (t.minX || t._origX - 200);
+            if (bounded) t._phase = 'retracting';
+          } else {
+            t._holdTimer--;
+            if (t._holdTimer <= 0) t._phase = 'retracting';
+          }
+        }
+        if (t._phase === 'retracting') {
+          const retractSpeed = t.retractSpeed || 3;
+          t._curH = Math.max(0, t._curH - retractSpeed);
+          t.y     = t._origY + (t._origH - t._curH);
+          t.h     = t._curH;
+          if (t._curH <= 0) {
+            t._phase = 'hidden';
+            t.x      = t._origX || t.x; // reset position
+          }
+        }
+        // Shrink/expand variant
+        if (t.shrinkCycle) {
+          const sp = (Date.now() / 1000 * 60) % (t.shrinkCycle * 60);
+          t.w = (t._origW || t.w) * (0.5 + 0.5 * Math.abs(Math.sin(sp / (t.shrinkCycle * 60) * Math.PI)));
+        }
+        break;
+
+      // ════ FEATURE 6: SLANT GROUND ════════════════
+
+      case 'slant':
+        // Tilt angle animates between 0 and maxAngle
+        if (!t._angle)   t._angle   = 0;
+        if (!t._origX)   t._origX   = t.x;
+        if (!t._origY)   t._origY   = t.y;
+        // Oscillate tilt
+        if (t.oscillate) {
+          const sp2 = Date.now() * (t.oscillateSpeed || 0.001);
+          t._angle  = (t.maxAngle || 0.35) * Math.sin(sp2);
+        }
+        // Trigger-based tilt: ramps up when player steps on it
+        if (t.triggerTilt && player.alive) {
+          const onSlant = rectOverlap(player.x, player.y + PLAYER_H - 8, PLAYER_W, 12,
+                                      t.x, t.y, t.w || 200, 20);
+          if (onSlant) {
+            t._angle = Math.min(t.maxAngle || 0.4,
+                                (t._angle || 0) + (t.tiltSpeed || 0.01));
+          } else {
+            t._angle = Math.max(0, (t._angle || 0) - (t.tiltSpeed || 0.005));
+          }
+        }
+        break;
+
       case 'pressure_button':
         // Requires a player to stand on it — tracks who is pressing
         if (!t._pressed) t._pressed = false;
@@ -3915,15 +4079,18 @@ function updatePlayer() {
   const rKey = player.controlsFlipped ? (keys.left  || touchLeft)  : (keys.right || touchRight);
   const jKey = keys.jump || touchJump;
 
+  // Apply stack speed penalty — bottom player slows when carrying others
+  const stackMult = (multiMode && player._stackSpeedMult) ? player._stackSpeedMult : 1;
+  const effectiveSpeed = MOVE_SPEED * stackMult;
+
   if (player.onIce) {
-    // Ice: low friction acceleration
-    if (lKey) player.vx -= 0.6;
-    else if (rKey) player.vx += 0.6;
+    if (lKey) player.vx -= 0.6 * stackMult;
+    else if (rKey) player.vx += 0.6 * stackMult;
     else player.vx *= 0.98;
-    player.vx = Math.max(-MOVE_SPEED * 1.5, Math.min(MOVE_SPEED * 1.5, player.vx));
+    player.vx = Math.max(-effectiveSpeed * 1.5, Math.min(effectiveSpeed * 1.5, player.vx));
   } else {
-    if (lKey) { player.vx = -MOVE_SPEED; player.facing = -1; }
-    else if (rKey) { player.vx = MOVE_SPEED; player.facing = 1; }
+    if (lKey) { player.vx = -effectiveSpeed; player.facing = -1; }
+    else if (rKey) { player.vx = effectiveSpeed; player.facing = 1; }
     else { player.vx *= 0.75; }
   }
 
@@ -3980,8 +4147,9 @@ function checkPlayerCollisions(lvl) {
 
   // Collect open holes — these punch through solid floor collision
   const openHoles = traps.filter(t =>
-    (t.type === 'floor_hole' && t.state === 'open') ||
-    (t.type === 'expanding_hole' && t.expanding)
+    (t.type === 'floor_hole'    && t.state === 'open') ||
+    (t.type === 'expanding_hole' && t.expanding)       ||
+    (t.type === 'smart_hole'    && t.state === 'open' && !t.fake)
   );
 
   platforms.forEach(p => {
@@ -4062,6 +4230,47 @@ function checkTrapCollisions() {
         if (player.x + PLAYER_W > t.x && player.x < t.x + t.w &&
             player.y + PLAYER_H > t.y && player.y < t.y + t.h) {
           killPlayer("THE FLOOR WAS A LIE.");
+        }
+        break;
+
+      case 'smart_hole':
+        if (t.fake) break; // fake hole — no collision
+        if (t.state !== 'open') break;
+        if (player.x + PLAYER_W > t.x && player.x < t.x + t.w &&
+            player.y + PLAYER_H > t.y && player.y < t.y + t.h) {
+          killPlayer("SURPRISE HOLE.");
+        }
+        break;
+
+      case 'chasing_spike':
+        if (rectOverlap(player.x+4, player.y+4, PLAYER_W-8, PLAYER_H-8,
+                        t.x, t.y, t.w||32, t.h||32)) {
+          killPlayer("THE SPIKE FOLLOWED YOU.");
+        }
+        break;
+
+      case 'pillar':
+        if (t._phase === 'extended' || t._phase === 'rising') {
+          if (!t.fake && rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H,
+                                     t.x, t.y, t.w, t.h)) {
+            // Push player away from pillar
+            const px = player.x + PLAYER_W/2;
+            const tx = t.x + t.w/2;
+            player.x += (px > tx ? 4 : -4);
+            player.vx = (px > tx ? 5 : -5);
+            // If pushed off a ledge into a trap, it's the player's problem :)
+          }
+        }
+        break;
+
+      case 'slant':
+        // Apply slide force when player stands on slant
+        if (t._angle && Math.abs(t._angle) > 0.02 && player.alive && player.onGround) {
+          const onSlant = player.x + PLAYER_W > t.x && player.x < t.x + (t.w||200) &&
+                          Math.abs(player.y + PLAYER_H - t.y) < 20;
+          if (onSlant) {
+            player.vx += Math.sin(t._angle) * 2.5; // slide down the slope
+          }
         }
         break;
 
@@ -4859,6 +5068,130 @@ function drawTraps() {
           ctx.shadowBlur  = 0;
         }
         break;
+
+      case 'smart_hole': {
+        if (t.invisible) break; // truly invisible — no draw at all
+
+        const isOpen = t.state === 'open';
+        if (!isOpen) break;
+
+        if (t.fake) {
+          // Fake hole — looks like a hole but lighter, slightly translucent
+          ctx.fillStyle   = 'rgba(0,0,0,0.35)';
+          ctx.fillRect(t.x, t.y, t.w, t.h);
+          ctx.strokeStyle = 'rgba(255,100,0,0.4)';
+          ctx.lineWidth   = 1;
+          ctx.setLineDash([4,4]);
+          ctx.strokeRect(t.x, t.y, t.w, t.h);
+          ctx.setLineDash([]);
+        } else {
+          // Real smart hole — deep black with animated pulsing edge
+          const pulse = 0.6 + 0.4 * Math.sin(Date.now() * 0.006);
+          ctx.fillStyle = '#000';
+          ctx.fillRect(t.x, t.y, t.w, t.h);
+          // Animated void shimmer inside
+          ctx.fillStyle = `rgba(80,0,0,${0.2 + pulse * 0.1})`;
+          ctx.fillRect(t.x + 4, t.y + 4, t.w - 8, t.h - 8);
+          ctx.shadowColor = `rgba(255,60,0,${pulse})`;
+          ctx.shadowBlur  = 16;
+          ctx.strokeStyle = `rgba(255,80,0,${pulse})`;
+          ctx.lineWidth   = 2;
+          ctx.strokeRect(t.x, t.y, t.w, t.h);
+          ctx.shadowBlur  = 0;
+          // Chase indicator arrow
+          if (t.chase) {
+            ctx.fillStyle = `rgba(255,150,50,${0.5 + pulse * 0.3})`;
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('▼', t.x + t.w/2, t.y - 4);
+            ctx.textAlign = 'left';
+          }
+        }
+        break;
+      }
+
+      case 'chasing_spike': {
+        // Spike with motion trail
+        const trailLen = 3;
+        const vDir = (player.x + PLAYER_W/2) > (t.x + (t.w||32)/2) ? 1 : -1;
+        for (let i = trailLen; i > 0; i--) {
+          ctx.globalAlpha = 0.15 * (trailLen - i + 1) / trailLen;
+          drawSpike(t.x - vDir * i * 6, t.y, t.w||32, t.h||32, false);
+        }
+        ctx.globalAlpha = 1;
+        // Main spike with red glow
+        ctx.shadowColor = '#ff2222';
+        ctx.shadowBlur  = 8;
+        drawSpike(t.x, t.y, t.w||32, t.h||32, false);
+        ctx.shadowBlur  = 0;
+        break;
+      }
+
+      case 'pillar': {
+        if (t._curH <= 0) break;
+        const px = t.x, py = t.y, pw = t.w, ph = t.h;
+
+        if (t.fake) {
+          // Fake pillar — drawn translucent, doesn't actually push
+          ctx.globalAlpha = 0.35;
+        }
+
+        // Pillar body — brick style matching Level Devil palette
+        const brickH2 = 24;
+        for (let by = py; by < py + ph; by += brickH2) {
+          const bh = Math.min(brickH2, py + ph - by);
+          ctx.fillStyle = (Math.floor((by - py) / brickH2) % 2 === 0) ? '#c87010' : '#b05808';
+          ctx.fillRect(px + 1, by + 1, pw - 2, bh - 2);
+        }
+        // Top cap — lighter
+        ctx.fillStyle = '#f0a030';
+        ctx.fillRect(px, py, pw, 6);
+        // Outline
+        ctx.strokeStyle = t._phase === 'rising' || t._phase === 'extended' ? '#ffaa00' : '#884400';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px, py, pw, ph);
+        // Top spike row — danger indicator
+        if (!t.fake && (t._phase === 'extended' || t._phase === 'rising')) {
+          ctx.shadowColor = '#ff6600';
+          ctx.shadowBlur  = 6;
+          drawSpike(px, py - 14, pw, 14, false);
+          ctx.shadowBlur  = 0;
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case 'slant': {
+        if (!t._angle && t._angle !== 0) break;
+        const sx = t.x, sy = t.y;
+        const sw2 = t.w || 200, sh2 = t.h || 24;
+        const ang  = t._angle || 0;
+
+        ctx.save();
+        ctx.translate(sx + sw2/2, sy + sh2/2);
+        ctx.rotate(ang);
+
+        // Slant platform — same style as normal platforms
+        ctx.fillStyle = '#d4a520';
+        ctx.fillRect(-sw2/2, -sh2/2, sw2, sh2);
+        // Top highlight
+        ctx.fillStyle = '#f5c842';
+        ctx.fillRect(-sw2/2, -sh2/2, sw2, Math.min(6, sh2/3));
+        // Shadow edge
+        ctx.strokeStyle = '#a07010';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-sw2/2, -sh2/2, sw2, sh2);
+        // Angle indicator arrows
+        if (Math.abs(ang) > 0.05) {
+          ctx.fillStyle = 'rgba(255,200,0,0.7)';
+          ctx.font = '11px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(ang > 0 ? '→' : '←', 0, sh2/2 + 14);
+          ctx.textAlign = 'left';
+        }
+        ctx.restore();
+        break;
+      }
 
       case 'ceiling_spike':
         if (t.state !== 'gone') {
