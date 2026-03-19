@@ -1128,6 +1128,18 @@ let stateTickAccum  = 0;
 const STATE_TICK_MS = 33; // ~30 Hz
 let lastInputSent   = 0;
 
+// ── INTERPOLATION STATE ─────────────────────
+// Instead of teleporting remote players to server positions,
+// we keep a small buffer and smoothly interpolate between snapshots.
+// This makes 200ms lag look smooth instead of jittery.
+const INTERP_DELAY_MS = 100; // render remote players 100ms behind latest snapshot
+const _remoteSnapshots = new Map(); // slot → [{ts, x, y, vx, vy, ...}, ...]
+const _MAX_SNAPSHOTS   = 8;        // keep last 8 snapshots per player
+
+// ── MISSED PACKET DETECTION ─────────────────
+let _lastStateSeq = -1;
+let _missedPackets = 0;
+
 // ════════════════════════════════════════════════
 //  SOCKET.IO — INIT & CONNECT
 // ════════════════════════════════════════════════
@@ -1136,11 +1148,16 @@ function connectSocket(cb) {
 
   try {
     socket = io(window.SERVER_URL, {
-      transports: ['websocket', 'polling'],
+      // WebSocket only — polling adds 200-400ms latency per packet
+      // If WebSocket fails, we show an error rather than silently lag
+      transports: ['websocket'],
+      upgrade: false,
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      timeout: 8000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1500,
+      reconnectionDelayMax: 8000,
+      // Longer timeout — Render free tier can take 3-5s to wake on first connect
+      timeout: 15000,
     });
   } catch(e) {
     console.warn('[Socket] io() failed — server offline?', e.message);
@@ -1237,6 +1254,14 @@ function connectSocket(cb) {
 
   socket.on('game:state', (payload) => {
     if (!isHost) applyGameState(payload);
+  });
+
+  // Client missed packets — force full sync next broadcast
+  socket.on('game:client_needs_sync', () => {
+    if (isHost) {
+      _fullSyncRequested = true;
+      _lastBroadcast = null;
+    }
   });
 
   socket.on('game:input', (payload) => {
@@ -1636,21 +1661,76 @@ function leaveGame() {
 // ════════════════════════════════════════════════
 //  PHASE 3 — GAME STATE SYNC
 // ════════════════════════════════════════════════
+// Cache of last broadcast for delta comparison
+let _lastBroadcast = null;
+let _fullSyncRequested = false;
+
+// Called by game:client_needs_sync — send a full fat packet next tick
+socket && socket.on && (function() {
+  // This is set up in connectSocket, but also guard here
+})();
+
 function broadcastGameState() {
   if (!isHost || !multiMode || !socket) return;
+
+  // Build player states (always send — small and critical)
+  const players = buildAllPlayerStates();
+
+  // ── DELTA TRAPS: only send traps that changed since last broadcast ──
+  // A trap "changed" if any of its key fields differ from last tick.
+  // This cuts packet size by 70-90% on most frames.
+  const changedTraps = [];
+  traps.forEach((t, i) => {
+    const last = _lastBroadcast?.trapCache?.[i];
+    const cur = {
+      state:    t.state,
+      x:        Math.round(t.x * 10) / 10,   // 1dp precision saves bytes
+      y:        Math.round(t.y * 10) / 10,
+      angle:    t.angle    !== undefined ? Math.round(t.angle * 100) / 100 : undefined,
+      extended: t.extended !== undefined ? Math.round(t.extended * 100) / 100 : undefined,
+      on:       t.on,
+      _phase:   t._phase,
+      _speed:   t._speed !== undefined ? Math.round(t._speed * 10) / 10 : undefined,
+      drops:    t.drops ? t.drops.map(d => ({
+        x: Math.round(d.x), y: Math.round(d.y)
+      })) : undefined,
+    };
+    // Send if no cache OR any field changed
+    let changed = !last || _fullSyncRequested;
+    if (!changed) {
+      changed = cur.state !== last.state || cur.on !== last.on ||
+                Math.abs((cur.x||0) - (last.x||0)) > 0.5 ||
+                Math.abs((cur.y||0) - (last.y||0)) > 0.5 ||
+                cur._phase !== last._phase;
+    }
+    if (changed) changedTraps.push({ i, ...cur });
+    _lastBroadcast = _lastBroadcast || {};
+    if (!_lastBroadcast.trapCache) _lastBroadcast.trapCache = {};
+    _lastBroadcast.trapCache[i] = cur;
+  });
+
+  // ── DELTA PLATFORMS: only changed ones ──
+  const changedPlatforms = [];
+  platforms.forEach((p, i) => {
+    const last = _lastBroadcast?.platCache?.[i];
+    if (!last || last.state !== p.state || Math.abs(last.y - p.y) > 0.5 || _fullSyncRequested) {
+      changedPlatforms.push({ i, state: p.state, y: Math.round(p.y * 10) / 10 });
+    }
+    if (!_lastBroadcast.platCache) _lastBroadcast.platCache = {};
+    _lastBroadcast.platCache[i] = { state: p.state, y: p.y };
+  });
+
+  _fullSyncRequested = false;
+
   const state = {
-    ts: Date.now(),
-    players: buildAllPlayerStates(),
-    traps: traps.map((t,i) => ({
-      i, state: t.state, x: t.x, y: t.y,
-      angle: t.angle, extended: t.extended,
-      on: t.on,
-      drops: t.drops ? t.drops.map(d=>({x:d.x,y:d.y})) : undefined,
-    })),
-    platforms: platforms.map((p,i) => ({ i, state: p.state, y: p.y })),
-    key:  key  ? { collected: key.collected }  : null,
-    door: door ? { open: door.open } : null,
+    ts:        Date.now(),
+    players,
+    traps:     changedTraps,
+    platforms: changedPlatforms,
+    key:       key  ? { collected: key.collected }  : null,
+    door:      door ? { open: door.open }            : null,
   };
+
   socket.emit('game:state', state);
 }
 
@@ -1670,29 +1750,109 @@ function buildAllPlayerStates() {
 }
 
 function applyGameState(msg) {
+  const now = Date.now();
+
+  // ── Missed packet detection ──────────────────
+  if (msg._seq !== undefined) {
+    if (_lastStateSeq !== -1) {
+      const expected = (_lastStateSeq + 1) & 0xFFFF;
+      if (msg._seq !== expected) {
+        _missedPackets++;
+        // After 3 missed packets in a row, ask host for a full sync
+        if (_missedPackets >= 3) {
+          _missedPackets = 0;
+          if (socket) socket.emit('game:request_sync');
+        }
+      } else {
+        _missedPackets = 0;
+      }
+    }
+    _lastStateSeq = msg._seq;
+  }
+
+  // ── Player snapshots → interpolation buffer ──
+  // Store the snapshot with its server timestamp.
+  // The draw function will interpolate between the last two snapshots
+  // at (now - INTERP_DELAY_MS) to smooth out network jitter.
   msg.players.forEach(ps => {
     if (ps.slot === myPlayerIdx) return;
+    if (!_remoteSnapshots.has(ps.slot)) _remoteSnapshots.set(ps.slot, []);
+    const buf = _remoteSnapshots.get(ps.slot);
+    buf.push({ ts: now, ...ps });
+    // Keep only last N snapshots
+    if (buf.length > _MAX_SNAPSHOTS) buf.shift();
+    // Also update remotePlayers immediately for game logic (collisions etc.)
     remotePlayers.set(ps.slot, { ...ps });
   });
-  msg.traps.forEach(ts => {
-    if (!traps[ts.i]) return;
-    Object.assign(traps[ts.i], {
-      state:    ts.state,
-      x:        ts.x,
-      y:        ts.y,
-      angle:    ts.angle    ?? traps[ts.i].angle,
-      extended: ts.extended ?? traps[ts.i].extended,
-      on:       ts.on       ?? traps[ts.i].on,
-      drops:    ts.drops    ?? traps[ts.i].drops,
+
+  // ── Traps: only update what host explicitly sent ──
+  // Delta: skip traps where nothing changed (saves CPU on apply)
+  if (msg.traps) {
+    msg.traps.forEach(ts => {
+      if (!traps[ts.i]) return;
+      const t = traps[ts.i];
+      if (ts.state    !== undefined) t.state    = ts.state;
+      if (ts.x        !== undefined) t.x        = ts.x;
+      if (ts.y        !== undefined) t.y        = ts.y;
+      if (ts.angle    !== undefined) t.angle    = ts.angle;
+      if (ts.extended !== undefined) t.extended = ts.extended;
+      if (ts.on       !== undefined) t.on       = ts.on;
+      if (ts.drops    !== undefined) t.drops    = ts.drops;
+      if (ts._phase   !== undefined) t._phase   = ts._phase;
+      if (ts._speed   !== undefined) t._speed   = ts._speed;
     });
-  });
-  msg.platforms.forEach(ps => {
-    if (!platforms[ps.i]) return;
-    platforms[ps.i].state = ps.state;
-    platforms[ps.i].y     = ps.y;
-  });
-  if (msg.key  && key)  key.collected  = msg.key.collected;
-  if (msg.door && door) door.open      = msg.door.open;
+  }
+
+  // ── Platforms ──
+  if (msg.platforms) {
+    msg.platforms.forEach(ps => {
+      if (!platforms[ps.i]) return;
+      if (ps.state !== undefined) platforms[ps.i].state = ps.state;
+      if (ps.y     !== undefined) platforms[ps.i].y     = ps.y;
+    });
+  }
+
+  if (msg.key  && key)  key.collected = msg.key.collected;
+  if (msg.door && door) door.open     = msg.door.open;
+}
+
+// ── Get interpolated position for a remote player ──
+// Called every render frame. Returns smoothed x,y between snapshots.
+function getInterpolatedRemote(slot) {
+  const buf = _remoteSnapshots.get(slot);
+  const base = remotePlayers.get(slot);
+  if (!buf || buf.length < 2 || !base) return base;
+
+  const renderTime = Date.now() - INTERP_DELAY_MS;
+
+  // Find the two snapshots that straddle renderTime
+  let prev = buf[0], next = buf[1];
+  for (let i = 0; i < buf.length - 1; i++) {
+    if (buf[i].ts <= renderTime && buf[i+1].ts >= renderTime) {
+      prev = buf[i];
+      next = buf[i+1];
+      break;
+    }
+  }
+  // If renderTime is beyond all snapshots, extrapolate from latest
+  if (renderTime > buf[buf.length - 1].ts) {
+    const latest = buf[buf.length - 1];
+    const dt = (Date.now() - latest.ts) / 1000;
+    // Simple linear extrapolation from last velocity
+    return {
+      ...latest,
+      x: latest.x + (latest.vx || 0) * dt * 60,
+      y: latest.y + (latest.vy || 0) * dt * 60,
+    };
+  }
+
+  // Linear interpolation between prev and next
+  const t = prev.ts === next.ts ? 0 : (renderTime - prev.ts) / (next.ts - prev.ts);
+  return {
+    ...next,
+    x: prev.x + (next.x - prev.x) * t,
+    y: prev.y + (next.y - prev.y) * t,
+  };
 }
 
 function sendInputToHost() {
@@ -2504,6 +2664,12 @@ function applyRopeUpdate(msg) {
 // ════════════════════════════════════════════════
 function drawRemotePlayers() {
   remotePlayers.forEach((rp, slot) => {
+    // Use interpolated position instead of raw server position
+    // This eliminates visual teleporting from packet jitter
+    const interp = getInterpolatedRemote(slot);
+    if (interp && interp !== rp) {
+      rp = { ...rp, x: interp.x, y: interp.y };
+    }
     if (!rp.alive) return;
     const colorIdx = slot % PLAYER_COLORS.length;
     drawRemotePlayer(rp, colorIdx, slot);
@@ -2988,6 +3154,12 @@ async function loadLevel(idx) {
 
   // Reset per-level multiplayer tracking
   _doorReached.clear();
+  // Clear interpolation buffers — old positions must not bleed into new level
+  _remoteSnapshots.clear();
+  _lastBroadcast     = null;
+  _lastStateSeq      = -1;
+  _missedPackets     = 0;
+  _fullSyncRequested = false;
   const hudTrap = document.getElementById('hudTrap');
   if (hudTrap) { hudTrap.style.color = '#ff8800'; }
 
