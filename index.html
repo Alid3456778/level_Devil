@@ -204,32 +204,112 @@
     touch-action: none;
   }
 
-  /* ─── HUD ─── */
-  #hud {
+  /* ─── UNIFIED TOP BAR (HUD + controls) ─── */
+  #topBar {
     position: absolute;
     top: 0; left: 0; right: 0;
-    padding: clamp(5px,1.2vw,8px) clamp(6px,1.5vw,12px);
-    padding-top: calc(clamp(5px,1.2vw,8px) + var(--safe-top));
-    /* Leave right space for voice controls when in multiplayer */
-    padding-right: clamp(6px,1.5vw,12px);
+    height: clamp(32px, 6vw, 44px);
+    padding-top: var(--safe-top);
     display: flex;
-    justify-content: flex-start;
     align-items: center;
-    gap: clamp(8px,2vw,20px);
-    background: linear-gradient(to bottom, #6b6a6acc, transparent);
+    gap: 0;
+    background: rgba(0,0,0,0.82);
+    z-index: 30;
+    overflow: hidden;
     pointer-events: none;
-    z-index: 10;
-    flex-wrap: nowrap;
+  }
+  /* Left section: level name + deaths */
+  #hudLeft {
+    display: flex;
+    align-items: center;
+    gap: clamp(6px,1.5vw,14px);
+    padding: 0 clamp(6px,1.5vw,12px);
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
   }
-  #hud .hud-item {
-    font-size: clamp(7px,1.8vw,10px);
+  /* Center section: player name — shrinks on mobile */
+  #hudCenter {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 1;
+    min-width: 0;
+    padding: 0 4px;
+  }
+  /* Right section: ping + fullscreen + mic + leave — all inline */
+  #hudRight {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 clamp(4px,1vw,8px);
+    flex-shrink: 0;
+    pointer-events: all;
+  }
+
+  /* HUD text items */
+  #hud { display: contents; } /* legacy — keep id for JS, no layout effect */
+  .hud-item {
+    font-size: clamp(6px,1.5vw,9px);
     color: var(--white);
     text-shadow: 1px 1px 0 #000;
     white-space: nowrap;
   }
-  #hud .level-info  { color: var(--yellow); }
-  #hud .death-count { color: var(--red); }
+  .level-info  { color: #f0c010 !important; }
+  .death-count { color: #ff2a2a !important; }
+
+  /* Player name — smaller on mobile */
+  #hudPlayer {
+    font-size: clamp(5px,1.2vw,8px);
+    color: rgba(240,240,240,0.8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: clamp(60px, 15vw, 120px);
+  }
+
+  /* Unified control buttons in top bar */
+  .top-btn {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.85);
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(7px,1.8vw,9px);
+    height: clamp(22px,4.5vw,30px);
+    padding: 0 clamp(5px,1.2vw,8px);
+    cursor: pointer;
+    border-radius: 3px;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    transition: background 0.1s;
+    pointer-events: all;
+    line-height: 1;
+  }
+  .top-btn:active { background: rgba(255,100,0,0.4); }
+  .top-btn.muted  { color: #ff2a2a; border-color: #ff2a2a44; }
+  .top-btn.active { color: #00ff88; border-color: #00ff8844; }
+  .top-btn.leave  { color: #ff4444; border-color: #ff444444; }
+
+  /* Ping display inline in top bar */
+  #pingDisplay {
+    font-size: clamp(5px,1.2vw,7px);
+    color: #00ff88;
+    background: transparent;
+    padding: 0 4px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* Fullscreen button — same style as other top bar buttons */
+  #btnFullscreen {
+    /* Removed old positioning — now inside #hudRight */
+    position: static !important;
+    top: unset !important;
+    left: unset !important;
+  }
+  /* Still hide on desktop */
+  @media (pointer: fine) { #btnFullscreen { display: none !important; } }
 
   /* ─── MOBILE CONTROLS (always shown on touch) ─── */
   #mobileControls {
@@ -246,7 +326,7 @@
   .mobile-btn {
     position: absolute;
     /* Pixel-art dark button like Level Devil reference */
-    background: #5c5a5a17;
+    background: #1a1a1a;
     border: 3px solid #444;
     border-bottom: 5px solid #222;
     border-right: 4px solid #111;
@@ -268,7 +348,7 @@
   .mobile-btn:active, .mobile-btn.pressed {
     transform: translateY(3px);
     box-shadow: 0 1px 0 rgba(0,0,0,0.5);
-    background: #2a2a2a10;
+    background: #2a2a2a;
     border-color: #ff8800;
   }
   #btnLeft  {
@@ -523,7 +603,7 @@
   /* ─── VOICE TILES (lobby + in-game) ─── */
   #voicePanel {
     position: absolute;
-    top: calc(clamp(28px,6vw,44px) + var(--safe-top) + 4px);
+    top: calc(clamp(32px,6vw,44px) + var(--safe-top) + 4px);
     right: calc(4px + var(--safe-right));
     display: flex;
     flex-direction: column;
@@ -560,20 +640,7 @@
   }
   .voice-tile .vt-mic { font-size: 9px; cursor: pointer; }
 
-  /* Voice controls in-game */
-  #voiceControls {
-    position: absolute;
-    top: 0;
-    right: 0;
-    display: flex;
-    gap: 4px;
-    z-index: 20;
-    flex-wrap: nowrap;
-    align-items: center;
-    padding: clamp(4px,1vw,8px) clamp(4px,1vw,8px);
-    padding-top: calc(clamp(4px,1vw,8px) + var(--safe-top));
-    background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%);
-  }
+  /* vc-btn kept for lobby compatibility */
   .vc-btn {
     background: rgba(0,0,0,0.78);
     border: 1px solid #444;
@@ -583,7 +650,6 @@
     padding: clamp(4px,1vw,6px) clamp(6px,1.5vw,10px);
     cursor: pointer;
     border-radius: 3px;
-    backdrop-filter: blur(4px);
     transition: all 0.1s;
     min-height: 28px;
     white-space: nowrap;
@@ -592,43 +658,8 @@
   .vc-btn.muted  { color: var(--red);  border-color: var(--red); }
   .vc-btn.active { color: #00ff88;     border-color: #00ff88; }
 
-  /* Fullscreen button */
-  #btnFullscreen {
-    position: absolute;
-    top: calc(clamp(4px,1vw,8px) + var(--safe-top));
-    left: calc(8px + var(--safe-left));
-    z-index: 30;
-    background: rgba(0,0,0,0.6);
-    border: 1px solid rgba(255,255,255,0.3);
-    color: rgba(255,255,255,0.8);
-    font-size: clamp(14px,3vw,20px);
-    width: clamp(36px,8vw,48px);
-    height: clamp(36px,8vw,48px);
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    border-radius: 6px;
-    backdrop-filter: blur(4px);
-    pointer-events: all;
-    transition: background 0.1s;
-    line-height: 1;
-  }
-  #btnFullscreen:active { background: rgba(255,100,0,0.5); }
-  /* Hide on desktop where fullscreen is via F11 */
-  @media (pointer: fine) { #btnFullscreen { display: none; } }
-
-  /* Ping */
-  #pingDisplay {
-    position: absolute;
-    top: calc(clamp(28px,6vw,44px) + var(--safe-top));
-    right: calc(8px + var(--safe-right));
-    font-size: clamp(6px,1.5vw,7px);
-    color: #00ff88;
-    background: rgba(0,0,0,0.6);
-    padding: 2px 6px;
-    border-radius: 2px;
-    z-index: 15;
-    pointer-events: none;
-  }
+  /* In-game voiceControls — hidden, replaced by hudRight */
+  #voiceControls { display: none !important; }
 
   /* Connecting overlay */
   #connectingOverlay {
@@ -861,29 +892,39 @@
 <div id="gameScreen" class="screen">
   <canvas id="gameCanvas"></canvas>
 
-  <!-- HUD -->
-  <div id="hud">
-    <div class="hud-item level-info" id="hudLevel">LEVEL 1</div>
-    <div class="hud-item" id="hudPlayer">PLAYER</div>
-    <div id="hudTrap" style="display:none;"></div>
-    <div class="hud-item death-count" id="hudDeaths">💀 0</div>
+  <!-- ═══ UNIFIED TOP BAR ═══ -->
+  <div id="topBar">
+    <!-- Left: level + deaths -->
+    <div id="hudLeft">
+      <span class="hud-item level-info" id="hudLevel">LVL 1</span>
+      <span class="hud-item death-count" id="hudDeaths">💀 0</span>
+    </div>
+    <!-- Center: player name (shrinks on mobile) -->
+    <div id="hudCenter">
+      <span id="hudPlayer" class="hud-item">PLAYER</span>
+    </div>
+    <!-- Right: ping + fullscreen + mic + leave (all inline) -->
+    <div id="hudRight">
+      <span id="pingDisplay" style="display:none;">● --ms</span>
+      <!-- Sound mute toggle — always visible -->
+      <button id="btnMute" class="top-btn" onclick="toggleGameMute()" title="Mute/Unmute">🔊</button>
+      <!-- Fullscreen: mobile only (hidden on desktop via CSS) -->
+      <button id="btnFullscreen" class="top-btn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+      <!-- Mic + Leave: shown only in multiplayer via JS -->
+      <button class="top-btn" id="inGameMicBtn" onclick="toggleMic()" style="display:none;">🔇</button>
+      <button class="top-btn leave" id="inGameLeaveBtn" onclick="leaveGame()" style="display:none;">✕</button>
+    </div>
   </div>
 
-  <!-- Ping (multiplayer only) -->
-  <div id="pingDisplay" style="display:none;">● --ms</div>
-
-  <!-- Voice tiles in-game -->
-  <div id="voicePanel"></div>
-
-  <!-- Voice controls -->
+  <!-- Hidden fields kept for JS compatibility -->
+  <div id="hud"     style="display:none;"></div>
+  <div id="hudTrap" style="display:none;"></div>
   <div id="voiceControls" style="display:none;">
-    <button class="vc-btn" id="inGameMicBtn" onclick="toggleMic()">🔇 MIC</button>
-    <button class="vc-btn" onclick="leaveGame()"
-            style="border-color:#ff2a2a;color:#ff2a2a;">✕ LEAVE</button>
+    <button id="inGameMicBtn2" onclick="toggleMic()"></button>
   </div>
 
-  <!-- Fullscreen button (mobile only via CSS) -->
-  <button id="btnFullscreen" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+  <!-- Voice tiles — below top bar -->
+  <div id="voicePanel"></div>
 
   <!-- Mobile Controls -->
   <div id="mobileControls">
@@ -916,6 +957,111 @@
 </div>
 
 <script>
+// ════════════════════════════════════════════════
+//  AUDIO SYSTEM
+//  Files live in: assets/music/
+//  Expects: bg_game.mp3, bg_menu.mp3, sfx_death.mp3,
+//           sfx_win.mp3, sfx_key.mp3, sfx_door.mp3,
+//           sfx_jump.mp3, sfx_fall.mp3, sfx_spike.mp3
+// ════════════════════════════════════════════════
+const AUDIO = {
+  _ctx:    null,
+  _bgNode: null,
+  _bgGain: null,
+  _sfxGain: null,
+  _muted:  false,
+  _bgFile: null,
+
+  // ── Init AudioContext on first user gesture ──
+  _ensureCtx() {
+    if (this._ctx) return;
+    try {
+      this._ctx    = new (window.AudioContext || window.webkitAudioContext)();
+      this._bgGain = this._ctx.createGain();
+      this._bgGain.gain.value = 0.35;
+      this._bgGain.connect(this._ctx.destination);
+      this._sfxGain = this._ctx.createGain();
+      this._sfxGain.gain.value = 0.7;
+      this._sfxGain.connect(this._ctx.destination);
+    } catch(e) { console.warn('[Audio] init failed:', e); }
+  },
+
+  // ── Load a file and decode into AudioBuffer ──
+  async _load(url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(res.status);
+      const buf = await res.arrayBuffer();
+      return await this._ctx.decodeAudioData(buf);
+    } catch(e) {
+      console.warn('[Audio] load failed:', url, e.message);
+      return null;
+    }
+  },
+
+  // ── Play background music (loops) ──
+  async playBg(file) {
+    this._ensureCtx();
+    if (!this._ctx) return;
+    if (this._bgFile === file) return; // already playing
+    this.stopBg();
+    this._bgFile = file;
+    const buf = await this._load('assets/music/' + file);
+    if (!buf || this._bgFile !== file) return; // superseded
+    this._bgNode = this._ctx.createBufferSource();
+    this._bgNode.buffer = buf;
+    this._bgNode.loop   = true;
+    this._bgNode.connect(this._bgGain);
+    if (!this._muted) this._bgNode.start(0);
+  },
+
+  // ── Stop background music ──
+  stopBg() {
+    if (this._bgNode) {
+      try { this._bgNode.stop(); } catch(e) {}
+      this._bgNode = null;
+    }
+    this._bgFile = null;
+  },
+
+  // ── Play a one-shot sound effect ──
+  async playSfx(file) {
+    this._ensureCtx();
+    if (!this._ctx || this._muted) return;
+    const buf = await this._load('assets/music/' + file);
+    if (!buf) return;
+    const src = this._ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this._sfxGain);
+    src.start(0);
+  },
+
+  // ── Toggle global mute ──
+  toggleMute() {
+    this._muted = !this._muted;
+    if (this._bgGain)  this._bgGain.gain.value  = this._muted ? 0 : 0.35;
+    if (this._sfxGain) this._sfxGain.gain.value  = this._muted ? 0 : 0.7;
+    return this._muted;
+  },
+
+  setVolume(bgVol, sfxVol) {
+    this._ensureCtx();
+    if (this._bgGain  && bgVol  !== undefined) this._bgGain.gain.value  = bgVol;
+    if (this._sfxGain && sfxVol !== undefined) this._sfxGain.gain.value = sfxVol;
+  },
+};
+
+// Unlock AudioContext on first touch/click (required on iOS)
+['touchstart','mousedown','keydown'].forEach(ev => {
+  document.addEventListener(ev, function _unlock() {
+    AUDIO._ensureCtx();
+    if (AUDIO._ctx && AUDIO._ctx.state === 'suspended') {
+      AUDIO._ctx.resume().catch(() => {});
+    }
+    document.removeEventListener(ev, _unlock);
+  }, { once: true });
+});
+
 // ════════════════════════════════════════════════
 //  LEVEL DEVIL — Phase 3: Multiplayer + Voice
 //  Architecture:
@@ -1135,7 +1281,10 @@ function connectSocket(cb) {
         break;
       case 'level_load':
         currentLevelIndex = data.levelIndex;
-        _doorReached.clear(); // reset door tracking for new level
+        _doorReached.clear();
+        // Restart music fresh on level reload (covers death-restart in multiplayer)
+        AUDIO._bgFile = null;
+        AUDIO.playBg('bg_game.mp3');
         loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
         hideOverlay('deathOverlay');
         break;
@@ -1436,7 +1585,8 @@ function launchMultiplayerGame(lvlOrder) {
   setTimeout(resize, 50);
   loadLevel(currentLevelIndex).then(() => {
     document.getElementById('pingDisplay').style.display = 'block';
-    document.getElementById('voiceControls').style.display = 'flex';
+    // Show mic + leave in top bar
+    ['inGameMicBtn','inGameLeaveBtn'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
     buildVoicePanel();
     if (animFrame) cancelAnimationFrame(animFrame);
     animFrame = requestAnimationFrame(loop);
@@ -1464,7 +1614,7 @@ function leaveGame() {
   multiMode = false;
   if (animFrame) cancelAnimationFrame(animFrame);
   document.getElementById('pingDisplay').style.display = 'none';
-  document.getElementById('voiceControls').style.display = 'none';
+  ['inGameMicBtn','inGameLeaveBtn'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   document.getElementById('voicePanel').innerHTML = '';
   showScreen('modeScreen');
 }
@@ -1719,7 +1869,7 @@ async function toggleMic() {
 function toggleCam() { /* camera removed */ }
 
 function updateVoiceButtons() {
-  ['lobbyMicBtn','inGameMicBtn'].forEach(id => {
+  ['lobbyMicBtn','inGameMicBtn','inGameMicBtn2'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
     btn.className   = 'vc-btn' + (micEnabled ? ' active' : ' muted');
@@ -2475,7 +2625,7 @@ function jumpToLevel(levelIdx) {
     resize();
     setTimeout(resize, 50);
     document.getElementById('pingDisplay').style.display = 'none';
-    document.getElementById('voiceControls').style.display = 'none';
+    ['inGameMicBtn','inGameLeaveBtn'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
     document.getElementById('voicePanel').innerHTML = '';
     loadLevel(currentLevelIndex).then(() => {
       if (animFrame) cancelAnimationFrame(animFrame);
@@ -2609,7 +2759,7 @@ function jumpToLevel(levelIdx) {
     // Report
     if (issues.length === 0) {
       out.style.color = '#00ff88';
-      out.textContent += ' ✓ LEVEL LOOKS COMPLETABLE No structural issues found.';
+      out.textContent += ' ✓ LEVEL LOOKS COMPLETABLE No structural issues found. ';
     } else {
       out.style.color = '#ff8800';
       out.textContent += ' ISSUES FOUND: ' + issues.join(' ') + ' ';
@@ -2696,6 +2846,12 @@ function resize() {
   }
 }
 
+function toggleGameMute() {
+  const muted = AUDIO.toggleMute();
+  const btn = document.getElementById('btnMute');
+  if (btn) btn.textContent = muted ? '🔇' : '🔊';
+}
+
 function toggleFullscreen() {
   const el = document.documentElement;
   if (!document.fullscreenElement &&
@@ -2743,7 +2899,7 @@ function startGame() {
   showScreen('gameScreen');
   resize();
   document.getElementById('pingDisplay').style.display = 'none';
-  document.getElementById('voiceControls').style.display = 'none';
+  ['inGameMicBtn','inGameLeaveBtn'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   document.getElementById('voicePanel').innerHTML = '';
   loadLevel(currentLevelIndex).then(() => {
     if (animFrame) cancelAnimationFrame(animFrame);
@@ -2801,7 +2957,7 @@ async function loadLevel(idx) {
   shakeTimer = 0;
   cam.x = 0; cam.y = 0;
 
-  document.getElementById('hudLevel').textContent = `LEVEL ${lvl.id}: ${lvl.name}`;
+  document.getElementById('hudLevel').textContent = `L${lvl.id}: ${lvl.name}`;
   document.getElementById('hudPlayer').textContent = playerName;
   document.getElementById('hudDeaths').textContent = `💀 ${deathCount}`;
 
@@ -3786,6 +3942,7 @@ function updatePlayer() {
     player.vy = (player.gravityFlipped ? Math.abs(JUMP_FORCE) : JUMP_FORCE) + stackBonus;
     jumpConsumed = true;
     player.onGround = false;
+    AUDIO.playSfx('sfx_jump.mp3');
   }
   if (!jKey) jumpConsumed = false;
 
@@ -4326,6 +4483,7 @@ function checkKey() {
     door.open = true;
     spawnParticles(key.x, key.y, '#ffd700', 20);
     shakeTimer = 8;
+    AUDIO.playSfx('sfx_key.mp3');
 
     // In multiplayer: broadcast key pickup so door opens for everyone instantly
     if (multiMode && socket) {
@@ -4350,6 +4508,16 @@ function killPlayer(msg) {
     PLAYER_COLORS[myPlayerIdx] || '#ff2a2a', 24);
   shakeTimer = 16;
   gameState = 'dead';
+  // Stop bg music immediately — restart fresh on respawn
+  AUDIO.stopBg();
+  // Play contextual death SFX
+  if (msg && (msg.includes('VOID') || msg.includes('FLOOR') || msg.includes('FELL'))) {
+    AUDIO.playSfx('sfx_fall.mp3');
+  } else if (msg && (msg.includes('SPIKE') || msg.includes('SAW') || msg.includes('LASER') || msg.includes('PISTON'))) {
+    AUDIO.playSfx('sfx_spike.mp3');
+  } else {
+    AUDIO.playSfx('sfx_death.mp3');
+  }
 
   if (multiMode && socket) {
     // Broadcast death — this triggers ALL other players to die & restart together
@@ -4369,9 +4537,11 @@ function killPlayer(msg) {
 
 function respawnPlayer() {
   hideOverlay('deathOverlay');
+  // Restart bg music fresh from the beginning — no stale position
+  AUDIO._bgFile = null; // clear cache so playBg forces a reload
+  AUDIO.playBg('bg_game.mp3');
   loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
   if (multiMode && socket) {
-    // Host broadcasts level reload to ALL so everyone restarts together
     if (isHost) {
       socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
     }
@@ -4381,7 +4551,10 @@ function respawnPlayer() {
 function levelClear() {
   gameState = 'clear';
   spawnParticles(door.x + 16, door.y + 32, '#ffd700', 40);
-  _doorReached.clear(); // reset for next level
+  _doorReached.clear();
+  // Stop bg music — will restart fresh when NEXT LEVEL is pressed
+  AUDIO.stopBg();
+  AUDIO.playSfx('sfx_door.mp3');
 
   const elapsed = ((Date.now() - levelStartTime) / 1000).toFixed(1);
   document.getElementById('levelStats').innerHTML =
@@ -4419,12 +4592,17 @@ function nextLevel() {
     showWin();
   } else {
     if (multiMode && socket) socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
+    // Start next level's music fresh from beginning
+    AUDIO._bgFile = null;
+    AUDIO.playBg('bg_game.mp3');
     loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
   }
 }
 
 function showWin() {
   gameState = 'won';
+  AUDIO.stopBg();
+  AUDIO.playSfx('sfx_win.mp3');
   const el = document.getElementById('winStats');
   if (el) {
     if (multiMode) {
@@ -4441,14 +4619,17 @@ function showWin() {
 function restartGame() {
   hideOverlay('winOverlay');
   if (multiMode) {
-    // Return to lobby
     buildVoicePanel();
-    showScreen('lobbyScreen');
+    showScreen('lobbyScreen'); // showScreen will start bg_menu.mp3
     return;
   }
   deathCount = 0;
   currentLevelIndex = 0;
   buildLevelOrder();
+  // Full audio reset — start game music fresh
+  AUDIO.stopBg();
+  AUDIO._bgFile = null;
+  AUDIO.playBg('bg_game.mp3');
   loadLevel(0).then(() => { gameState = 'playing'; });
 }
 
@@ -6046,6 +6227,12 @@ function setupMobileControls() {
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  // Background music per screen
+  if (id === 'nameScreen' || id === 'modeScreen' || id === 'lobbyScreen' || id === 'roomScreen') {
+    AUDIO.playBg('bg_menu.mp3');
+  } else if (id === 'gameScreen') {
+    AUDIO.playBg('bg_game.mp3');
+  }
 }
 
 function showOverlay(id) {
