@@ -1195,6 +1195,8 @@ function connectSocket(cb) {
     _setConnStatus(`» ${player.name} joined`);
     // Voice: call the new player
     _voiceCallPeer(player.socketId, player.slot);
+    // P2P game data channel: host opens offer to new player
+    if (isHost) setTimeout(() => _p2pCreateOffer(player.socketId), 600);
   });
 
   socket.on('room:player_left', ({ socketId, slot, name }) => {
@@ -1202,6 +1204,7 @@ function connectSocket(cb) {
     remotePlayers.delete(slot);
     removeVoiceTile(slot);
     _closePeerConn(socketId);
+    _p2pClose(socketId); // close game data channel
     updateLobbyUI();
     updateLobbyVoiceTiles();
     _setConnStatus(`» ${name} left`);
@@ -1234,6 +1237,12 @@ function connectSocket(cb) {
       try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
     }
   });
+
+  // ── P2P GAME DATA CHANNEL SIGNALING ──────────────────────────────
+  // These are tiny control messages (< 1KB each) — game state goes direct P2P
+  socket.on('p2p:offer',  async ({ from, offer })     => _p2pHandleOffer(from, offer));
+  socket.on('p2p:answer', async ({ from, answer })    => _p2pHandleAnswer(from, answer));
+  socket.on('p2p:ice',    async ({ from, candidate }) => _p2pAddIce(from, candidate));
 
   // ── Game events (host → clients via server) ──
   socket.on('game:start', ({ levelOrder, mpOnlyMode: mpo, ropeEnabled, summary }) => {
@@ -1274,6 +1283,16 @@ function connectSocket(cb) {
   socket.on('game:event', ({ type, fromSocketId, ...data }) => {
     const p = [...players.values()].find(x => x.socketId === fromSocketId);
     switch (type) {
+      case 'remote_trap_kill': {
+        // Host killed a remote player — that remote player dies on all clients
+        const rpKill = remotePlayers.get(data.slot ?? slot);
+        if (rpKill) {
+          rpKill.alive = false;
+          spawnParticles(rpKill.x + PLAYER_W/2, rpKill.y + PLAYER_H/2, '#ff4444', 20);
+        }
+        break;
+      }
+
       case 'player_died': {
         if (!p) return;
         const rp = remotePlayers.get(p.slot);
@@ -1665,6 +1684,187 @@ function leaveGame() {
 let _lastBroadcast = null;
 let _fullSyncRequested = false;
 
+// ════════════════════════════════════════════════
+//  WEBRTC P2P DATA CHANNELS
+//  Game state travels Host→Client directly.
+//  Server is only used for WebRTC signaling (tiny messages).
+//  This eliminates server relay latency completely.
+// ════════════════════════════════════════════════
+const _rtcPeers   = new Map(); // socketId → RTCPeerConnection
+const _rtcChannels= new Map(); // socketId → RTCDataChannel (send side, host only)
+const _rtcReady   = new Map(); // socketId → boolean (channel open)
+
+const _RTC_CONFIG = {
+  iceServers: [
+    // Free public STUN servers — no account needed, no cost
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    // Free TURN fallback (open-relay.metered.ca — 0.5GB/month free)
+    // Only used when direct P2P fails (e.g. symmetric NAT, mobile carrier)
+    {
+      urls:       'turn:openrelay.metered.ca:80',
+      username:   'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls:       'turn:openrelay.metered.ca:443',
+      username:   'openrelayproject',
+      credential: 'openrelayproject',
+    },
+  ],
+  iceTransportPolicy: 'all', // try direct first, fall back to TURN automatically
+};
+
+// How many P2P channels are open and ready
+function _p2pReadyCount() {
+  let n = 0;
+  _rtcReady.forEach(v => { if (v) n++; });
+  return n;
+}
+
+// Send a message to one peer via DataChannel (host→client)
+function _p2pSend(socketId, data) {
+  const ch = _rtcChannels.get(socketId);
+  if (ch && ch.readyState === 'open') {
+    try { ch.send(typeof data === 'string' ? data : JSON.stringify(data)); return true; }
+    catch(e) {}
+  }
+  return false; // fell through — caller uses socket relay instead
+}
+
+// Send game state to ALL clients — P2P first, socket relay as fallback
+function _p2pBroadcast(data) {
+  const json = JSON.stringify(data);
+  let allP2P = true;
+  _rtcChannels.forEach((ch, sid) => {
+    if (ch && ch.readyState === 'open') {
+      try { ch.send(json); }
+      catch(e) { allP2P = false; }
+    } else {
+      allP2P = false;
+    }
+  });
+  return allP2P;
+}
+
+// Host creates P2P offer for a new client
+async function _p2pCreateOffer(clientSocketId) {
+  if (!isHost || _rtcPeers.has(clientSocketId)) return;
+  const pc = new RTCPeerConnection(_RTC_CONFIG);
+  _rtcPeers.set(clientSocketId, pc);
+
+  // Create data channel for game state (unreliable = UDP-like, ordered = false)
+  // For game state we want speed over reliability — interpolation handles gaps
+  const ch = pc.createDataChannel('game', {
+    ordered:           false, // don't wait for retransmit
+    maxRetransmits:    0,     // drop stale packets
+  });
+  _rtcChannels.set(clientSocketId, ch);
+
+  ch.onopen  = () => {
+    _rtcReady.set(clientSocketId, true);
+    console.log('[P2P] DataChannel open to', clientSocketId);
+    // Force a full sync on first connect
+    _fullSyncRequested = true;
+    _lastBroadcast = null;
+  };
+  ch.onclose = () => {
+    _rtcReady.set(clientSocketId, false);
+    console.log('[P2P] DataChannel closed for', clientSocketId);
+  };
+  ch.onerror = (e) => console.warn('[P2P] DataChannel error:', e);
+
+  // ICE candidates go through signaling server (tiny messages, not game data)
+  pc.onicecandidate = ({ candidate }) => {
+    if (candidate && socket) {
+      socket.emit('p2p:ice', { to: clientSocketId, candidate });
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  if (socket) socket.emit('p2p:offer', { to: clientSocketId, offer });
+  console.log('[P2P] Offer sent to', clientSocketId);
+}
+
+// Client receives offer and sends answer
+async function _p2pHandleOffer(fromSocketId, offer) {
+  if (isHost) return; // hosts don't receive offers
+  const pc = new RTCPeerConnection(_RTC_CONFIG);
+  _rtcPeers.set(fromSocketId, pc);
+
+  // Client receives data on this channel
+  pc.ondatachannel = ({ channel }) => {
+    channel.onmessage = ({ data }) => {
+      try {
+        const msg = JSON.parse(data);
+        // Route message type — same as socket handlers
+        if (msg._type === 'game:state') {
+          applyGameState(msg);
+        } else if (msg._type === 'game:event') {
+          _handleGameEvent(msg);
+        }
+      } catch(e) {}
+    };
+    channel.onopen  = () => { _rtcReady.set(fromSocketId, true);  console.log('[P2P] Channel open from host'); };
+    channel.onclose = () => { _rtcReady.set(fromSocketId, false); };
+  };
+
+  pc.onicecandidate = ({ candidate }) => {
+    if (candidate && socket) {
+      socket.emit('p2p:ice', { to: fromSocketId, candidate });
+    }
+  };
+
+  await pc.setRemoteDescription(offer);
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  if (socket) socket.emit('p2p:answer', { to: fromSocketId, answer });
+}
+
+// Host receives answer from client
+async function _p2pHandleAnswer(fromSocketId, answer) {
+  const pc = _rtcPeers.get(fromSocketId);
+  if (pc) await pc.setRemoteDescription(answer);
+}
+
+// Both sides add ICE candidates
+async function _p2pAddIce(fromSocketId, candidate) {
+  const pc = _rtcPeers.get(fromSocketId);
+  if (pc) {
+    try { await pc.addIceCandidate(candidate); } catch(e) {}
+  }
+}
+
+// Clean up a peer connection
+function _p2pClose(socketId) {
+  const pc = _rtcPeers.get(socketId);
+  if (pc) { try { pc.close(); } catch(e) {} }
+  _rtcPeers.delete(socketId);
+  _rtcChannels.delete(socketId);
+  _rtcReady.delete(socketId);
+}
+
+// Extract game event handling into a standalone function so P2P can call it
+function _handleGameEvent({ type, fromSocketId, slot, ...data }) {
+  // This mirrors the socket.on('game:event') handler
+  const p = [...(players?.values?.() || [])].find(x => x.socketId === fromSocketId);
+  _dispatchGameEvent(type, slot ?? p?.slot, data, fromSocketId);
+}
+
+// How many clients are fully connected via P2P vs socket relay
+function _getConnectionMode() {
+  const total = remotePlayers.size;
+  const p2p   = _p2pReadyCount();
+  if (total === 0) return 'solo';
+  if (p2p >= total) return 'p2p';
+  if (p2p > 0) return 'hybrid';
+  return 'relay';
+}
+
+
+
 // Called by game:client_needs_sync — send a full fat packet next tick
 socket && socket.on && (function() {
   // This is set up in connectSocket, but also guard here
@@ -1731,7 +1931,13 @@ function broadcastGameState() {
     door:      door ? { open: door.open }            : null,
   };
 
-  socket.emit('game:state', state);
+  // Try P2P DataChannel first (direct, no server latency)
+  // Fall back to socket relay for clients not yet P2P-connected
+  const allP2P = _p2pBroadcast({ ...state, _type: 'game:state' });
+  if (!allP2P) {
+    // Some clients still on socket relay — send via server for those
+    socket.emit('game:state', state);
+  }
 }
 
 function buildAllPlayerStates() {
@@ -1921,7 +2127,10 @@ function updatePingDisplay() {
   const el = document.getElementById('pingDisplay');
   if (!el) return;
   const color = myPing < 80 ? '#00ff88' : myPing < 150 ? '#ffaa00' : '#ff2222';
-  el.innerHTML = `<span style="color:${color}">●</span> ${myPing}ms`;
+  const cMode = _getConnectionMode();
+  const mIcon = cMode === 'p2p' ? '⚡' : cMode === 'hybrid' ? '~' : '●';
+  const mTip  = cMode === 'p2p' ? 'Direct P2P' : cMode === 'hybrid' ? 'Mixed' : 'Server relay';
+  el.innerHTML = `<span style="color:${color}" title="${mTip}">${mIcon}</span> ${myPing}ms`;
 }
 
 function setStatus(id, msg, cls) {
@@ -3307,8 +3516,58 @@ function updatePlatforms(elapsed) {
 }
 
 // ─── TRAPS DYNAMICS ──────────────────────────
+// ─── MULTI-PLAYER TRAP AWARENESS ─────────────
+// Returns the player state (local or remote) nearest to (cx, cy).
+// Used so every trap reacts to ALL players, not just the host's local player.
+function getNearestPlayer(cx, cy) {
+  let best = null, bestDist = Infinity;
+  // Always check local player
+  if (player.alive) {
+    const d = Math.abs(player.x + PLAYER_W/2 - cx) + Math.abs(player.y + PLAYER_H/2 - cy);
+    if (d < bestDist) { bestDist = d; best = player; }
+  }
+  // Check all remote players
+  remotePlayers.forEach(rp => {
+    if (!rp.alive) return;
+    const d = Math.abs(rp.x + PLAYER_W/2 - cx) + Math.abs(rp.y + PLAYER_H/2 - cy);
+    if (d < bestDist) { bestDist = d; best = { ...rp, onGround: rp.onGround ?? true }; }
+  });
+  return best;
+}
+
+// Returns true if ANY player (local or remote) is alive
+function anyPlayerAlive() {
+  if (player.alive) return true;
+  for (const rp of remotePlayers.values()) { if (rp.alive) return true; }
+  return false;
+}
+
+// Returns true if ANY player is inside the given rect
+function anyPlayerInRect(rx, ry, rw, rh) {
+  const check = (px, py) =>
+    px + PLAYER_W > rx && px < rx + rw &&
+    py + PLAYER_H > ry && py < ry + rh;
+  if (player.alive && check(player.x, player.y)) return true;
+  for (const rp of remotePlayers.values()) {
+    if (rp.alive && check(rp.x, rp.y)) return true;
+  }
+  return false;
+}
+
+// Returns any player moving (vx > threshold) — for ceiling triggers etc.
+function anyPlayerMoving(threshold = 0.5) {
+  if (player.alive && Math.abs(player.vx) > threshold) return true;
+  for (const rp of remotePlayers.values()) {
+    if (rp.alive && Math.abs(rp.vx || 0) > threshold) return true;
+  }
+  return false;
+}
+
 function updateTraps() {
   const now = Date.now();
+  // ── Build nearest-player context ──────────────
+  // Every trap that reacts to a player must check ALL players, not just the host.
+  // getNearestPlayer() returns whichever player (local or remote) is closest to a point.
   traps.forEach(t => {
     switch (t.type) {
       case 'spike_moving_h':
@@ -3718,10 +3977,10 @@ function updateTraps() {
         break;
 
       case 'ceiling_crusher':
-        // Drops when player is moving, resets slowly to tease retry
         if (!t._phase) t._phase = 'idle';
         if (t._phase === 'idle') {
-          if (player.alive && Math.abs(player.vx) > 0.5) {
+          // Trigger when ANY player moves — not just the host
+          if (anyPlayerMoving(0.5)) {
             t._phase = 'dropping';
             t._vy = 0;
             t._origY = t._origY || t.y;
@@ -3758,12 +4017,12 @@ function updateTraps() {
         if (!t._speed)  t._speed  = 0;
 
         if (t._phase === 'idle') {
-          // Trigger when player moves OR after delay
           const triggerOnMove  = t.triggerOnMove !== false;
           const triggerOnTimer = t.triggerDelay && (Date.now() - levelStartTime) >= t.triggerDelay;
-          if ((triggerOnMove && player.alive && Math.abs(player.vx) > 0.5) || triggerOnTimer) {
+          // ANY player moving triggers the ceiling — not just the host
+          if ((triggerOnMove && anyPlayerMoving(0.5)) || triggerOnTimer) {
             t._phase   = 'warning';
-            t._warnTimer = t.warnDuration || 90; // ~1.5s warning
+            t._warnTimer = t.warnDuration || 90;
             shakeTimer = 8;
           }
         }
@@ -3789,12 +4048,19 @@ function updateTraps() {
           const floorY  = t.floorY  || 416;
           const playerClearance = (floorY - PLAYER_H - 8) - t.y - t.h;
 
-          // Kill player if ceiling reaches them
+          // Kill ANY player the ceiling reaches
           if (player.alive && t.y + t.h >= player.y + 4) {
             killPlayer("THE CEILING CRUSHED YOU.");
           }
+          // Also emit kill event for remote players (host only)
+          if (isHost || !multiMode) {
+            remotePlayers.forEach((rp, slot) => {
+              if (rp.alive && t.y + t.h >= rp.y + 4 && socket) {
+                socket.emit('game:event', { type: 'remote_trap_kill', slot, msg: 'CEILING CRUSHED THEM.' });
+              }
+            });
+          }
 
-          // Hit floor — full crush
           if (t.y + t.h >= floorY) {
             t.y = floorY - t.h;
             t._phase = 'crushed';
@@ -3822,16 +4088,18 @@ function updateTraps() {
           t.state = 'open';
         }
 
-        // B) Chase player — if player jumps over hole, hole slides toward them
-        if (t.chase && player.alive) {
-          const hCX = t.x + t.w / 2;
-          const pCX = player.x + PLAYER_W / 2;
-          const above = player.y + PLAYER_H <= t.y + 8;
-          if (above && Math.abs(pCX - hCX) < 300) {
-            const speed = t.chaseSpeed || 2;
-            t.x += Math.sign(pCX - hCX) * speed;
-            // Stay inside level bounds
-            t.x = Math.max(33, Math.min(2000, t.x));
+        // B) Chase nearest player — works for ALL players in multiplayer
+        if (t.chase) {
+          const np = getNearestPlayer(t.x + t.w/2, t.y);
+          if (np) {
+            const hCX = t.x + t.w / 2;
+            const pCX = np.x + PLAYER_W / 2;
+            const above = np.y + PLAYER_H <= t.y + 8;
+            if (above && Math.abs(pCX - hCX) < 300) {
+              const speed = t.chaseSpeed || 2;
+              t.x += Math.sign(pCX - hCX) * speed;
+              t.x = Math.max(33, Math.min(2000, t.x));
+            }
           }
           t.state = 'open';
         }
@@ -3846,22 +4114,21 @@ function updateTraps() {
       // ════ FEATURE 3: INTERACTIVE SPIKES ══════════
 
       case 'chasing_spike':
-        // Spike slides toward player when they jump over it
+        // Chase nearest player (any player, not just host)
         if (!t._origX) t._origX = t.x;
-        if (player.alive && !player.onGround && player.vy > -4) {
-          // Player is rising or falling (committed to a jump)
-          const pCX = player.x + PLAYER_W / 2;
-          const sCX = t.x + (t.w || 32) / 2;
-          const dist = Math.abs(pCX - sCX);
-          if (dist < (t.triggerRange || 200)) {
-            const speed = t.slideSpeed || 3;
-            t.x += Math.sign(pCX - sCX) * speed;
-            t.x = Math.max(t.minX || 33, Math.min(t.maxX || 2000, t.x));
-          }
-        } else if (player.onGround) {
-          // Slowly return to origin when player on ground
-          if (t._origX !== undefined) {
-            t.x += (t._origX - t.x) * 0.04;
+        {
+          const np = getNearestPlayer(t.x + (t.w||32)/2, t.y);
+          if (np && !np.onGround && (np.vy || 0) > -4) {
+            const pCX = np.x + PLAYER_W / 2;
+            const sCX = t.x + (t.w || 32) / 2;
+            const dist = Math.abs(pCX - sCX);
+            if (dist < (t.triggerRange || 200)) {
+              const speed = t.slideSpeed || 3;
+              t.x += Math.sign(pCX - sCX) * speed;
+              t.x = Math.max(t.minX || 33, Math.min(t.maxX || 2000, t.x));
+            }
+          } else if (!np || np.onGround) {
+            if (t._origX !== undefined) t.x += (t._origX - t.x) * 0.04;
           }
         }
         break;
@@ -3873,16 +4140,19 @@ function updateTraps() {
         if (!t._origH) { t._origH = t.h; t._origY = t.y; }
         if (!t._curH)  t._curH = 0;
 
-        // Trigger: player is within triggerRange horizontally
-        const pDist = Math.abs((player.x + PLAYER_W/2) - (t.x + t.w/2));
-        const tRange = t.triggerRange || 180;
+        // Trigger on nearest player — any player triggers the pillar
+        {
+          const npX = getNearestPlayer(t.x + t.w/2, t._origY || t.y);
+          const pDist = npX ? Math.abs((npX.x + PLAYER_W/2) - (t.x + t.w/2)) : Infinity;
+          const tRange = t.triggerRange || 180;
 
-        if (t._phase === 'hidden') {
-          t._curH = 0;
-          t.y     = t._origY + t._origH; // fully retracted below floor
-          if (player.alive && pDist < tRange) {
-            t._phase  = 'rising';
-            t._speed  = 0;
+          if (t._phase === 'hidden') {
+            t._curH = 0;
+            t.y     = t._origY + t._origH;
+            if (npX && pDist < tRange) {
+              t._phase = 'rising';
+              t._speed = 0;
+            }
           }
         }
         if (t._phase === 'rising') {
@@ -3936,13 +4206,11 @@ function updateTraps() {
           const sp2 = Date.now() * (t.oscillateSpeed || 0.001);
           t._angle  = (t.maxAngle || 0.35) * Math.sin(sp2);
         }
-        // Trigger-based tilt: ramps up when player steps on it
-        if (t.triggerTilt && player.alive) {
-          const onSlant = rectOverlap(player.x, player.y + PLAYER_H - 8, PLAYER_W, 12,
-                                      t.x, t.y, t.w || 200, 20);
+        // Trigger-based tilt: ramps up when ANY player steps on it
+        if (t.triggerTilt) {
+          const onSlant = anyPlayerInRect(t.x, t.y - 12, t.w || 200, 20);
           if (onSlant) {
-            t._angle = Math.min(t.maxAngle || 0.4,
-                                (t._angle || 0) + (t.tiltSpeed || 0.01));
+            t._angle = Math.min(t.maxAngle || 0.4, (t._angle || 0) + (t.tiltSpeed || 0.01));
           } else {
             t._angle = Math.max(0, (t._angle || 0) - (t.tiltSpeed || 0.005));
           }
@@ -4392,6 +4660,46 @@ function checkPlayerCollisions(lvl) {
 // ─── TRAP COLLISIONS ─────────────────────────
 function checkTrapCollisions() {
   if (player.invincible) return;
+
+  // ── Host also checks collisions for remote players ────────────────────
+  // This means ALL players trigger and die from traps, not just the host player.
+  if ((isHost || !multiMode) && multiMode) {
+    remotePlayers.forEach((rp, slot) => {
+      if (!rp.alive) return;
+      traps.forEach(t => {
+        if (t.state === 'gone') return;
+        let hit = false;
+        let msg = 'A TRAP GOT THEM.';
+        // Check common deadly traps for remote players
+        if ((t.type==='spike_up'||t.type==='spike_down'||t.type==='spike_moving_h'||
+             t.type==='spike_moving_v'||t.type==='chasing_spike') &&
+             rectOverlap(rp.x+4, rp.y+4, PLAYER_W-8, PLAYER_H-8, t.x, t.y, t.w||32, t.h||32)) {
+          hit = true; msg = 'SPIKE GOT THEM.';
+        }
+        if (t.type==='lava_pool' && rectOverlap(rp.x+2, rp.y+2, PLAYER_W-4, PLAYER_H-4, t.x, t.y, t.w, t.h)) {
+          hit = true; msg = 'LAVA GOT THEM.';
+        }
+        if (t.type==='floor_hole' && t.state==='open' &&
+            rp.x+PLAYER_W > t.x && rp.x < t.x+t.w && rp.y+PLAYER_H > t.y && rp.y < t.y+t.h) {
+          hit = true; msg = 'FELL IN THE HOLE.';
+        }
+        if (t.type==='smart_hole' && !t.fake && t.state==='open' &&
+            rp.x+PLAYER_W > t.x && rp.x < t.x+t.w && rp.y+PLAYER_H > t.y && rp.y < t.y+t.h) {
+          hit = true; msg = 'SURPRISE HOLE.';
+        }
+        if (t.type==='saw_blade') {
+          const cx=t.x+t.r, cy=t.y+t.r, px=rp.x+PLAYER_W/2, py=rp.y+PLAYER_H/2;
+          if (Math.sqrt((cx-px)**2+(cy-py)**2) < t.r+8) { hit=true; msg='SAW BLADE.'; }
+        }
+        if (t.type==='wall_moving' && rectOverlap(rp.x, rp.y, PLAYER_W, PLAYER_H, t.x, t.y, t.w, t.h)) {
+          hit = true; msg = 'WALL CRUSHED THEM.';
+        }
+        if (hit && socket) {
+          socket.emit('game:event', { type: 'remote_trap_kill', slot, msg });
+        }
+      });
+    });
+  }
 
   traps.forEach(t => {
     if (t.state === 'gone') return;
