@@ -140,7 +140,8 @@ setInterval(() => {
 
 // ─── SOCKET.IO EVENTS ────────────────────────
 io.on('connection', socket => {
-  console.log(`[+] ${socket.id} connected (transport: ${socket.conn.transport.name})`);
+  const ua = socket.handshake.headers['user-agent'] || 'unknown';
+  console.log(`[+] ${socket.id} connected via ${socket.conn.transport.name} | rooms=${rooms.size} players=${totalPlayers()}`);
 
   // Log if transport downgrades (should not happen with websocket-only)
   socket.conn.on('upgrade', (transport) => {
@@ -206,27 +207,42 @@ io.on('connection', socket => {
       summary:      roomSummary(room),
     });
 
-    console.log(`[Room] ${room.code} started with ${room.players.size} players`);
+    const slots = [...room.players.values()].map(p => `${p.name}(${p.slot})`).join(', ');
+    console.log(`[Room] ${room.code} STARTED — players: ${slots} — levels: ${(levelOrder||[]).length}`);
     ack && ack({ ok: true });
   });
 
   // ── VOICE SIGNALING ───────────────────────────
+  // ── VOICE SIGNALING ──────────────────────────
   socket.on('voice:offer',  ({ to, offer })      => io.to(to).emit('voice:offer',  { from: socket.id, offer }));
   socket.on('voice:answer', ({ to, answer })     => io.to(to).emit('voice:answer', { from: socket.id, answer }));
   socket.on('voice:ice',    ({ to, candidate })  => io.to(to).emit('voice:ice',    { from: socket.id, candidate }));
 
-  // ✅ FIX 6: GAME STATE RELAY WITH SEQUENCE NUMBERS
-  // Clients can detect dropped packets and request a full sync if needed.
+  // ── P2P GAME DATA CHANNEL SIGNALING ──────────
+  // These are tiny WebRTC handshake messages (~1KB each, only at connect time).
+  // After handshake, game state travels Host→Client directly (zero server latency).
+  socket.on('p2p:offer',  ({ to, offer })      => io.to(to).emit('p2p:offer',  { from: socket.id, offer }));
+  socket.on('p2p:answer', ({ to, answer })     => io.to(to).emit('p2p:answer', { from: socket.id, answer }));
+  socket.on('p2p:ice',    ({ to, candidate })  => io.to(to).emit('p2p:ice',    { from: socket.id, candidate }));
+
+  // GAME STATE RELAY WITH SEQUENCE NUMBERS
+  let _stateRelayCount = 0;
   socket.on('game:state', (payload) => {
     const room = getRoomBySocket(socket.id);
     if (!room || room.hostSocketId !== socket.id) return;
 
-    // Attach sequence number so clients know packet ordering
-    room._stateSeq = (room._stateSeq + 1) & 0xFFFF; // wrap at 65535
+    room._stateSeq = (room._stateSeq + 1) & 0xFFFF;
     const tagged = { ...payload, _seq: room._stateSeq };
 
     // Relay to all clients except host
     socket.to(room.code).emit('game:state', tagged);
+
+    // Log every ~5s (150 ticks at 30Hz)
+    _stateRelayCount++;
+    if (_stateRelayCount % 150 === 0) {
+      const clientCount = room.players.size - 1;
+      console.log(`[Relay] Room ${room.code} seq=${room._stateSeq} clients=${clientCount} traps=${payload.traps?.length||0}`);
+    }
   });
 
   // ── PLAYER INPUT (client → host) ─────────────

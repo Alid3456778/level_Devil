@@ -323,10 +323,10 @@
     padding-left:   var(--safe-left);
     padding-right:  var(--safe-right);
   }
-   .mobile-btn {
+  .mobile-btn {
     position: absolute;
     /* Pixel-art dark button like Level Devil reference */
-    background: #73737313;
+    background: #1a1a1a;
     border: 3px solid #444;
     border-bottom: 5px solid #222;
     border-right: 4px solid #111;
@@ -348,7 +348,7 @@
   .mobile-btn:active, .mobile-btn.pressed {
     transform: translateY(3px);
     box-shadow: 0 1px 0 rgba(0,0,0,0.5);
-    background: transparent;
+    background: #2a2a2a;
     border-color: #ff8800;
   }
   #btnLeft  {
@@ -1125,16 +1125,20 @@ const ROPE_SNAP_LEN = 280;
 
 // ─── GAME STATE BROADCAST ────────────────────
 let stateTickAccum  = 0;
-const STATE_TICK_MS = 33; // ~30 Hz
+const STATE_TICK_MS = 22; // ~45 Hz — more frequent = less client drift
 let lastInputSent   = 0;
 
-// ── INTERPOLATION STATE ─────────────────────
-// Instead of teleporting remote players to server positions,
-// we keep a small buffer and smoothly interpolate between snapshots.
-// This makes 200ms lag look smooth instead of jittery.
-const INTERP_DELAY_MS = 100; // render remote players 100ms behind latest snapshot
+// ── PLAYER INTERPOLATION ────────────────────
+const INTERP_DELAY_MS  = 80;  // render remotes 80ms behind — balance smooth vs lag
 const _remoteSnapshots = new Map(); // slot → [{ts, x, y, vx, vy, ...}, ...]
-const _MAX_SNAPSHOTS   = 8;        // keep last 8 snapshots per player
+const _MAX_SNAPSHOTS   = 12;  // more snapshots = smoother over jitter
+
+// ── TRAP INTERPOLATION ───────────────────────
+// Clients run trap physics locally at 60fps for smooth animation.
+// Host corrections arrive at 45Hz — we DON'T hard-snap, we blend.
+// This eliminates the stutter on moving traps (spikes, saws, walls).
+const _trapTargets       = new Map(); // trapIdx → {x, y, angle, extended} from host
+const TRAP_CORRECT_SPEED = 0.25;      // blend 25% toward host per frame = ~8 frame convergence
 
 // ── MISSED PACKET DETECTION ─────────────────
 let _lastStateSeq = -1;
@@ -1167,17 +1171,27 @@ function connectSocket(cb) {
 
   socket.on('connect', () => {
     mySocketId = socket.id;
-    console.log('[Socket] Connected:', mySocketId);
+    const transport = socket.io.engine.transport.name;
+    console.log(`[Socket] ✓ Connected — id=${mySocketId} transport=${transport}`);
     cb && cb();
   });
 
   socket.on('connect_error', (err) => {
-    console.warn('[Socket] Connect error:', err.message);
+    console.error('[Socket] ✗ Connect error:', err.message, err.type || '');
     _setConnStatus('⚠ Cannot reach server: ' + err.message);
   });
 
+  socket.on('reconnect', (attempt) => {
+    console.log(`[Socket] Reconnected after ${attempt} attempts — id=${socket.id}`);
+    mySocketId = socket.id;
+  });
+
+  socket.on('reconnect_attempt', (n) => {
+    console.log(`[Socket] Reconnect attempt #${n}`);
+  });
+
   socket.on('disconnect', (reason) => {
-    console.log('[Socket] Disconnected:', reason);
+    console.warn(`[Socket] Disconnected: ${reason} — multiMode=${multiMode}`);
     if (multiMode) _setConnStatus('⚠ Disconnected: ' + reason);
   });
 
@@ -1244,10 +1258,15 @@ function connectSocket(cb) {
   socket.on('p2p:answer', async ({ from, answer })    => _p2pHandleAnswer(from, answer));
   socket.on('p2p:ice',    async ({ from, candidate }) => _p2pAddIce(from, candidate));
 
-  // ── Game events (host → clients via server) ──
+  // ── Game start — CLIENTS ONLY (host launches itself in hostStartGame) ──
   socket.on('game:start', ({ levelOrder, mpOnlyMode: mpo, ropeEnabled, summary }) => {
+    // Host already launched via hostStartGame() callback — skip to avoid double launch
+    if (isHost) {
+      console.log('[MP] game:start received but I am host — skipping (already launched)');
+      return;
+    }
+    console.log('[MP] game:start received as client — launching game');
     _applyRoomSummary(summary);
-    window.__levelOrder = levelOrder;
     // Sync lobby settings from host
     if (mpo !== undefined) {
       mpOnlyMode = mpo;
@@ -1295,26 +1314,31 @@ function connectSocket(cb) {
 
       case 'player_died': {
         if (!p) return;
+        console.log(`[MP] player_died received — slot=${p.slot}, mySlot=${myPlayerIdx}`);
+
+        // Mark remote player as dead + particles
         const rp = remotePlayers.get(p.slot);
         if (rp) {
           rp.alive = false;
           spawnParticles(rp.x + PLAYER_W/2, rp.y + PLAYER_H/2, PLAYER_COLORS[p.slot]||'#ff2a2a', 20);
         }
-        // ALL PLAYERS RESTART: when anyone dies, full level restart for everyone
-        // Show death message then reload level for local player too
+
+        // Skip if this is MY OWN death echoed back — killPlayer() already handled it
+        if (p.slot === myPlayerIdx) break;
+
+        // A DIFFERENT player died — show their death and die with them (squad restart)
         if (gameState === 'playing') {
-          const msg = data.msg || `${p.name || 'A PLAYER'} DIED — RESTARTING LEVEL!`;
+          const msg = data.msg || (p.name ? `${p.name} DIED!` : 'TEAMMATE DIED!');
           deathCount++;
           levelDeaths++;
           document.getElementById('hudDeaths').textContent = `💀 ${deathCount}`;
-          spawnParticles(player.x + PLAYER_W/2, player.y + PLAYER_H/2, '#ff2a2a', 16);
           shakeTimer = 20;
           gameState = 'dead';
           setTimeout(() => {
             document.getElementById('deathMsg').textContent = msg;
             document.getElementById('deathCountDisplay').textContent = deathCount;
             showOverlay('deathOverlay');
-          }, 400);
+          }, 500);
         }
         break;
       }
@@ -1325,17 +1349,36 @@ function connectSocket(cb) {
         break;
       }
       case 'level_complete':
-        if (isHost) hostAdvanceLevel();
+        // Only host decides to advance — non-hosts just wait for level_load
+        if (isHost) {
+          console.log('[Host] All players at door — advancing level');
+          hostAdvanceLevel();
+        }
         break;
-      case 'level_load':
-        currentLevelIndex = data.levelIndex;
+
+      case 'level_load': {
+        // Authoritative level load from host — ALL clients use this exact index
+        const newIdx = data.levelIndex;
+        console.log(`[MP] level_load received — index=${newIdx}, isHost=${isHost}`);
+        currentLevelIndex = newIdx;
         _doorReached.clear();
-        // Restart music fresh on level reload (covers death-restart in multiplayer)
+        hideOverlay('deathOverlay');
+        hideOverlay('levelClearOverlay');
+        gameState = 'loading';
         AUDIO._bgFile = null;
         AUDIO.playBg('bg_game.mp3');
-        loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
-        hideOverlay('deathOverlay');
+        loadLevel(currentLevelIndex).then(() => {
+          gameState = 'playing';
+          console.log(`[MP] Level ${newIdx} loaded and playing`);
+          if (!isHost && socket) {
+            socket.emit('game:event', { type: 'client_ready', levelIndex: newIdx });
+          }
+        }).catch(err => {
+          console.error('[MP] level_load failed:', err);
+          gameState = 'idle';
+        });
         break;
+      }
 
       case 'key_collected': {
         // Another player picked up the key — unlock door for everyone
@@ -1355,14 +1398,25 @@ function connectSocket(cb) {
       }
 
       case 'player_at_door': {
-        // Remote player reached the door — track and check if all done
-        if (p) _doorReached.add(p.slot);
-        const totalPlayers = 1 + remotePlayers.size;
-        if (_doorReached.size >= totalPlayers && gameState === 'playing') {
-          levelClear();
+        // A remote player reached the door — add to tally
+        if (p) {
+          _doorReached.add(p.slot);
+          console.log(`[MP] player_at_door slot=${p.slot}, doorReached=${_doorReached.size}`);
+        }
+        const totalMP = 1 + remotePlayers.size;
+        if (isHost) {
+          // Only HOST checks if everyone is done and triggers level advance
+          if (_doorReached.size >= totalMP && gameState === 'playing') {
+            console.log('[Host] All players at door — clearing level');
+            levelClear();
+          } else {
+            _showDoorWait(totalMP - _doorReached.size);
+          }
         } else {
-          const waiting = totalPlayers - _doorReached.size;
-          _showDoorWait(waiting);
+          // Non-host clients just show the wait indicator
+          if (_doorReached.size < totalMP) {
+            _showDoorWait(totalMP - _doorReached.size);
+          }
         }
         break;
       }
@@ -1397,11 +1451,44 @@ function connectSocket(cb) {
       }
 
       case 'rope_yank': {
-        // A remote player jumped hard — yank local player if rope is active
         if (isRopeLevelActive() && player.alive && data.slot !== myPlayerIdx) {
           player.vy = data.force || -15;
           player.onGround = false;
           spawnParticles(player.x, player.y, '#c8a060', 10);
+        }
+        break;
+      }
+
+      case 'client_ready': {
+        // A client finished loading — useful for debugging sync issues
+        console.log(`[Host] Client slot=${p?.slot} ready for level ${data.levelIndex}`);
+        // Force a full state sync to newly-ready client
+        _fullSyncRequested = true;
+        _lastBroadcast = null;
+        break;
+      }
+
+      case 'pillar_push': {
+        // Host pushed a remote player away from a pillar — apply to local if it's us
+        if (p && p.slot === myPlayerIdx) {
+          player.x  = data.newX;
+          player.vx = data.newX > player.x ? 5 : -5;
+        } else if (p) {
+          const rp = remotePlayers.get(p.slot);
+          if (rp) rp.x = data.newX;
+        }
+        break;
+      }
+
+      case 'request_restart': {
+        // A client is asking to restart (their respawn timed out waiting for host)
+        if (isHost && gameState !== 'playing') {
+          console.log('[Host] Client requested restart — broadcasting level_load');
+          socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
+          gameState = 'loading';
+          AUDIO._bgFile = null;
+          AUDIO.playBg('bg_game.mp3');
+          loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
         }
         break;
       }
@@ -1611,33 +1698,58 @@ function hostStartGame() {
   buildLevelOrder();
   const chkRope = document.getElementById('chkRope');
   const ropeEnabled = !!(chkRope && chkRope.checked);
+  console.log(`[Host] Starting game — levelOrder=${JSON.stringify(levelOrder.slice(0,5))}...`);
+
   socket.emit('room:start', { levelOrder, mpOnlyMode, ropeEnabled }, (res) => {
     if (!res || !res.ok) {
-      console.warn('[Host] Start failed');
+      console.error('[Host] room:start failed:', res);
       return;
     }
+    console.log('[Host] room:start acknowledged — launching game');
+    // Host launches itself here. Clients launch via socket.on('game:start').
     launchMultiplayerGame(levelOrder);
   });
 }
 
 function launchMultiplayerGame(lvlOrder) {
+  // Guard: if already launched (host double-call protection), skip
+  if (multiMode && gameState === 'playing') {
+    console.warn('[MP] launchMultiplayerGame called but already playing — skipping');
+    return;
+  }
+
+  console.log(`[MP] launchMultiplayerGame — isHost=${isHost}, levels=${lvlOrder?.length}`);
   if (lvlOrder) levelOrder = lvlOrder;
-  multiMode = true;
+  multiMode  = true;
   deathCount = 0;
   currentLevelIndex = 0;
-  gameState = 'playing';
+  gameState  = 'loading'; // Use 'loading' state during level fetch — NOT 'playing'
 
   showScreen('gameScreen');
   resize();
-  // Re-resize after a tick so browser has rendered the screen
-  setTimeout(resize, 50);
+  setTimeout(resize, 80);
+
   loadLevel(currentLevelIndex).then(() => {
+    gameState = 'playing'; // Set AFTER level is fully loaded
+    console.log(`[MP] Level 0 loaded — game running. isHost=${isHost}`);
+    // Tell host we are fully loaded and ready
+    if (!isHost && socket) {
+      socket.emit('game:event', { type: 'client_ready', levelIndex: currentLevelIndex });
+    }
+
     document.getElementById('pingDisplay').style.display = 'block';
-    // Show mic + leave in top bar
-    ['inGameMicBtn','inGameLeaveBtn'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
+    ['inGameMicBtn','inGameLeaveBtn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = '';
+    });
     buildVoicePanel();
-    if (animFrame) cancelAnimationFrame(animFrame);
+
+    // Cancel any existing loop before starting new one
+    if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
     animFrame = requestAnimationFrame(loop);
+  }).catch(err => {
+    console.error('[MP] Failed to load first level:', err);
+    gameState = 'idle';
   });
 }
 
@@ -1735,17 +1847,23 @@ function _p2pSend(socketId, data) {
 
 // Send game state to ALL clients — P2P first, socket relay as fallback
 function _p2pBroadcast(data) {
+  if (_rtcChannels.size === 0) return false; // No P2P clients — use socket
   const json = JSON.stringify(data);
   let allP2P = true;
+  let sentCount = 0;
   _rtcChannels.forEach((ch, sid) => {
     if (ch && ch.readyState === 'open') {
-      try { ch.send(json); }
-      catch(e) { allP2P = false; }
+      try { ch.send(json); sentCount++; }
+      catch(e) {
+        console.warn('[P2P] send error to', sid, e.message);
+        allP2P = false;
+      }
     } else {
-      allP2P = false;
+      allP2P = false; // This client not yet P2P — will need socket relay
     }
   });
-  return allP2P;
+  if (sentCount === 0) return false; // Nothing sent via P2P
+  return allP2P; // True only if ALL clients received via P2P
 }
 
 // Host creates P2P offer for a new client
@@ -1764,16 +1882,22 @@ async function _p2pCreateOffer(clientSocketId) {
 
   ch.onopen  = () => {
     _rtcReady.set(clientSocketId, true);
-    console.log('[P2P] DataChannel open to', clientSocketId);
-    // Force a full sync on first connect
+    console.log(`[P2P] ✓ DataChannel OPEN → ${clientSocketId} | total P2P=${_p2pReadyCount()}`);
     _fullSyncRequested = true;
     _lastBroadcast = null;
   };
   ch.onclose = () => {
     _rtcReady.set(clientSocketId, false);
-    console.log('[P2P] DataChannel closed for', clientSocketId);
+    console.warn(`[P2P] DataChannel CLOSED for ${clientSocketId}`);
   };
-  ch.onerror = (e) => console.warn('[P2P] DataChannel error:', e);
+  ch.onerror = (e) => console.error(`[P2P] DataChannel ERROR for ${clientSocketId}:`, e);
+
+  pc.onconnectionstatechange = () => {
+    console.log(`[P2P] Connection state → ${clientSocketId}: ${pc.connectionState}`);
+  };
+  pc.oniceconnectionstatechange = () => {
+    console.log(`[P2P] ICE state → ${clientSocketId}: ${pc.iceConnectionState}`);
+  };
 
   // ICE candidates go through signaling server (tiny messages, not game data)
   pc.onicecandidate = ({ candidate }) => {
@@ -1807,8 +1931,15 @@ async function _p2pHandleOffer(fromSocketId, offer) {
         }
       } catch(e) {}
     };
-    channel.onopen  = () => { _rtcReady.set(fromSocketId, true);  console.log('[P2P] Channel open from host'); };
-    channel.onclose = () => { _rtcReady.set(fromSocketId, false); };
+    channel.onopen  = () => {
+      _rtcReady.set(fromSocketId, true);
+      console.log(`[P2P] ✓ DataChannel OPEN ← from host ${fromSocketId}`);
+    };
+    channel.onclose = () => {
+      _rtcReady.set(fromSocketId, false);
+      console.warn(`[P2P] DataChannel CLOSED from host ${fromSocketId}`);
+    };
+    channel.onerror = (e) => console.error('[P2P] Client channel error:', e);
   };
 
   pc.onicecandidate = ({ candidate }) => {
@@ -1884,24 +2015,29 @@ function broadcastGameState() {
     const last = _lastBroadcast?.trapCache?.[i];
     const cur = {
       state:    t.state,
-      x:        Math.round(t.x * 10) / 10,   // 1dp precision saves bytes
+      x:        Math.round(t.x * 10) / 10,
       y:        Math.round(t.y * 10) / 10,
-      angle:    t.angle    !== undefined ? Math.round(t.angle * 100) / 100 : undefined,
+      // Include velocity so clients can extrapolate between packets
+      vx:       t.vx !== undefined ? Math.round(t.vx * 10) / 10 : undefined,
+      vy:       t.vy !== undefined ? Math.round(t.vy * 10) / 10 : undefined,
+      angle:    t.angle    !== undefined ? Math.round(t.angle * 1000) / 1000 : undefined,
       extended: t.extended !== undefined ? Math.round(t.extended * 100) / 100 : undefined,
       on:       t.on,
       _phase:   t._phase,
-      _speed:   t._speed !== undefined ? Math.round(t._speed * 10) / 10 : undefined,
+      _curH:    t._curH !== undefined ? Math.round(t._curH * 10) / 10 : undefined,
+      _speed:   t._speed !== undefined ? Math.round(t._speed * 100) / 100 : undefined,
       drops:    t.drops ? t.drops.map(d => ({
         x: Math.round(d.x), y: Math.round(d.y)
       })) : undefined,
     };
-    // Send if no cache OR any field changed
     let changed = !last || _fullSyncRequested;
     if (!changed) {
       changed = cur.state !== last.state || cur.on !== last.on ||
-                Math.abs((cur.x||0) - (last.x||0)) > 0.5 ||
-                Math.abs((cur.y||0) - (last.y||0)) > 0.5 ||
-                cur._phase !== last._phase;
+                Math.abs((cur.x||0) - (last.x||0)) > 0.3 ||
+                Math.abs((cur.y||0) - (last.y||0)) > 0.3 ||
+                Math.abs((cur.angle||0) - (last.angle||0)) > 0.01 ||
+                cur._phase !== last._phase ||
+                cur.extended !== last.extended;
     }
     if (changed) changedTraps.push({ i, ...cur });
     _lastBroadcast = _lastBroadcast || {};
@@ -1931,13 +2067,59 @@ function broadcastGameState() {
     door:      door ? { open: door.open }            : null,
   };
 
-  // Try P2P DataChannel first (direct, no server latency)
-  // Fall back to socket relay for clients not yet P2P-connected
-  const allP2P = _p2pBroadcast({ ...state, _type: 'game:state' });
-  if (!allP2P) {
-    // Some clients still on socket relay — send via server for those
-    socket.emit('game:state', state);
+  // Dual-path broadcast: P2P (fast, direct) + socket relay (reliable fallback)
+  // Always send via socket so clients without P2P still get state.
+  // P2P clients also receive via socket but deduplicate by _seq.
+  _p2pBroadcast({ ...state, _type: 'game:state' });
+  socket.emit('game:state', state);
+  _broadcastCount++;
+
+  // Periodic connection log (~every 5s at 30Hz)
+  if (_broadcastCount % 150 === 0) {
+    const mode = _getConnectionMode();
+    console.log(`[Host] Broadcast #${_broadcastCount} mode=${mode} p2p=${_p2pReadyCount()}/${remotePlayers.size} trapsChanged=${state.traps.length}`);
   }
+}
+let _broadcastCount = 0;
+
+// ─── CLIENT TRAP POSITION SMOOTHING ─────────────
+// Called every frame on non-host clients.
+// Smoothly moves each trap toward the host-authoritative target position.
+// Lerp speed is tuned so traps look smooth at 100ms network latency.
+function lerpTrapPositions() {
+  if (!multiMode || isHost) return;
+  // Adaptive lerp speed:
+  // - Fast for slow traps (pillars, ceilings) — needs to catch up
+  // - Slower for fast traps (spike wheels, moving spikes) — prevent overshoot
+  traps.forEach(t => {
+    // Position X
+    if (t._targetX !== undefined) {
+      const distX = t._targetX - t.x;
+      const lerp = Math.abs(distX) > 20 ? 0.35 : 0.25; // faster when far
+      t.x += distX * lerp;
+      if (Math.abs(distX) < 0.05) t.x = t._targetX;
+    }
+    // Position Y
+    if (t._targetY !== undefined) {
+      const distY = t._targetY - t.y;
+      const lerp = Math.abs(distY) > 20 ? 0.35 : 0.25;
+      t.y += distY * lerp;
+      if (Math.abs(distY) < 0.05) t.y = t._targetY;
+    }
+    // Angle (spike wheel, saw blade, magnetic spike)
+    if (t._targetAngle !== undefined) {
+      const da = t._targetAngle - (t.angle || 0);
+      t.angle = (t.angle || 0) + da * 0.25;
+    }
+    // Pillar height (_curH)
+    if (t._targetCurH !== undefined) {
+      const dh = t._targetCurH - (t._curH || 0);
+      t._curH = (t._curH || 0) + dh * 0.3;
+      t.h = t._curH;
+      if (t._origY !== undefined) t.y = t._origY + (t._origH||0) - t._curH;
+      if (Math.abs(dh) < 0.05) t._curH = t._targetCurH;
+    }
+  });
 }
 
 function buildAllPlayerStates() {
@@ -1958,16 +2140,20 @@ function buildAllPlayerStates() {
 function applyGameState(msg) {
   const now = Date.now();
 
-  // ── Missed packet detection ──────────────────
+  // ── Deduplication: same _seq from both P2P and socket relay ──
   if (msg._seq !== undefined) {
+    if (msg._seq === _lastStateSeq) {
+      return; // Duplicate packet (received via both P2P and socket) — discard
+    }
+    // Missed packet detection
     if (_lastStateSeq !== -1) {
       const expected = (_lastStateSeq + 1) & 0xFFFF;
       if (msg._seq !== expected) {
         _missedPackets++;
-        // After 3 missed packets in a row, ask host for a full sync
-        if (_missedPackets >= 3) {
+        if (_missedPackets >= 5) {
           _missedPackets = 0;
           if (socket) socket.emit('game:request_sync');
+          console.log('[Client] 5 missed packets — requesting full sync');
         }
       } else {
         _missedPackets = 0;
@@ -1981,31 +2167,42 @@ function applyGameState(msg) {
   // The draw function will interpolate between the last two snapshots
   // at (now - INTERP_DELAY_MS) to smooth out network jitter.
   msg.players.forEach(ps => {
-    if (ps.slot === myPlayerIdx) return;
+    if (ps.slot === myPlayerIdx) return; // local player is authoritative — never overwrite
     if (!_remoteSnapshots.has(ps.slot)) _remoteSnapshots.set(ps.slot, []);
     const buf = _remoteSnapshots.get(ps.slot);
-    buf.push({ ts: now, ...ps });
-    // Keep only last N snapshots
+    // Stamp with local receive time for interpolation
+    buf.push({ ts: now, ...ps, _recvTs: now });
     if (buf.length > _MAX_SNAPSHOTS) buf.shift();
-    // Also update remotePlayers immediately for game logic (collisions etc.)
-    remotePlayers.set(ps.slot, { ...ps });
+    // Update game logic state immediately (collisions, stacking, etc.)
+    const existing = remotePlayers.get(ps.slot) || {};
+    remotePlayers.set(ps.slot, { ...existing, ...ps });
   });
 
-  // ── Traps: only update what host explicitly sent ──
-  // Delta: skip traps where nothing changed (saves CPU on apply)
+  // ── Traps: set TARGET positions for smooth interpolation ──
+  // Non-host clients do NOT teleport traps to host values.
+  // Instead we store _targetX/_targetY and lerp toward them every frame.
+  // This eliminates the 33ms snap/jitter seen on client screens.
   if (msg.traps) {
     msg.traps.forEach(ts => {
       if (!traps[ts.i]) return;
       const t = traps[ts.i];
+      // State/phase changes apply immediately (no visual for these)
       if (ts.state    !== undefined) t.state    = ts.state;
-      if (ts.x        !== undefined) t.x        = ts.x;
-      if (ts.y        !== undefined) t.y        = ts.y;
-      if (ts.angle    !== undefined) t.angle    = ts.angle;
-      if (ts.extended !== undefined) t.extended = ts.extended;
       if (ts.on       !== undefined) t.on       = ts.on;
-      if (ts.drops    !== undefined) t.drops    = ts.drops;
       if (ts._phase   !== undefined) t._phase   = ts._phase;
-      if (ts._speed   !== undefined) t._speed   = ts._speed;
+      if (ts.drops    !== undefined) t.drops    = ts.drops;
+      if (ts.extended !== undefined) t.extended = ts.extended;
+      // Position/angle: store as targets for smooth lerp in updateTraps
+      if (ts.x        !== undefined) t._targetX     = ts.x;
+      if (ts.y        !== undefined) t._targetY     = ts.y;
+      if (ts.angle    !== undefined) t._targetAngle = ts.angle;
+      if (ts._curH    !== undefined) t._targetCurH  = ts._curH;
+      if (ts._speed   !== undefined) t._speed       = ts._speed;
+      if (ts.vx       !== undefined) t.vx           = ts.vx;
+      if (ts.vy       !== undefined) t.vy           = ts.vy;
+      // If target is far from current (>80px), snap instead of lerp (level load / teleport)
+      if (t._targetX !== undefined && Math.abs(t.x - t._targetX) > 80) t.x = t._targetX;
+      if (t._targetY !== undefined && Math.abs(t.y - t._targetY) > 80) t.y = t._targetY;
     });
   }
 
@@ -2043,12 +2240,12 @@ function getInterpolatedRemote(slot) {
   // If renderTime is beyond all snapshots, extrapolate from latest
   if (renderTime > buf[buf.length - 1].ts) {
     const latest = buf[buf.length - 1];
-    const dt = (Date.now() - latest.ts) / 1000;
-    // Simple linear extrapolation from last velocity
+    // velocity is in px/frame at 60fps, dt is in frames
+    const dtFrames = Math.min((Date.now() - latest.ts) / (1000 / 60), 3); // cap at 3 frames
     return {
       ...latest,
-      x: latest.x + (latest.vx || 0) * dt * 60,
-      y: latest.y + (latest.vy || 0) * dt * 60,
+      x: latest.x + (latest.vx || 0) * dtFrames,
+      y: latest.y + (latest.vy || 0) * dtFrames,
     };
   }
 
@@ -2061,28 +2258,54 @@ function getInterpolatedRemote(slot) {
   };
 }
 
+let _lastInputState = null;
 function sendInputToHost() {
   if (!multiMode || isHost || !socket) return;
   const now = Date.now();
-  if (now - lastInputSent < 16) return; // 60 Hz cap
+  if (now - lastInputSent < 16) return; // 60Hz cap
+
+  const left  = !!(keys.left  || touchLeft);
+  const right = !!(keys.right || touchRight);
+  const jump  = !!(keys.jump  || touchJump);
+
+  // Always send position/velocity at 20Hz regardless of input change
+  // Send input changes immediately (zero delay on press/release)
+  const inputChanged = !_lastInputState ||
+    _lastInputState.left !== left ||
+    _lastInputState.right !== right ||
+    _lastInputState.jump !== jump;
+
+  const timeSinceLastSend = now - lastInputSent;
+  if (!inputChanged && timeSinceLastSend < 50) return; // throttle unchanged input to 20Hz
+
   lastInputSent = now;
+  _lastInputState = { left, right, jump };
+
   socket.emit('game:input', {
-    left:  keys.left  || touchLeft,
-    right: keys.right || touchRight,
-    jump:  keys.jump  || touchJump,
-    x: player.x, y: player.y,
-    vx: player.vx, vy: player.vy,
+    left, right, jump,
+    x:  Math.round(player.x * 10) / 10,
+    y:  Math.round(player.y * 10) / 10,
+    vx: Math.round(player.vx * 100) / 100,
+    vy: Math.round(player.vy * 100) / 100,
     alive: player.alive,
     facing: player.facing,
     gravityFlipped: player.gravityFlipped,
     animFrame: player.animFrame,
+    ts: now, // for host-side latency compensation
   });
 }
 
 function applyRemoteInput(slot, msg) {
+  const existing = remotePlayers.get(slot) || {};
+  // If we have a recent position, blend rather than snap (prevents teleport)
+  // Only hard-set if position diverged significantly (> 64px off)
+  const dx = Math.abs((existing.x || 0) - msg.x);
+  const dy = Math.abs((existing.y || 0) - msg.y);
+  const hardSnap = dx > 64 || dy > 64 || !existing.x;
   remotePlayers.set(slot, {
-    ...(remotePlayers.get(slot) || {}),
-    x: msg.x, y: msg.y,
+    ...existing,
+    x:  hardSnap ? msg.x : existing.x + (msg.x - existing.x) * 0.4,
+    y:  hardSnap ? msg.y : existing.y + (msg.y - existing.y) * 0.4,
     vx: msg.vx, vy: msg.vy,
     facing: msg.facing,
     gravityFlipped: msg.gravityFlipped,
@@ -2095,13 +2318,30 @@ function applyRemoteInput(slot, msg) {
 function hostAdvanceLevel() {
   currentLevelIndex++;
   const idx = currentLevelIndex;
+  console.log(`[Host] hostAdvanceLevel — new index=${idx}, total levels=${levelOrder.length}`);
+
   if (idx >= levelOrder.length) {
+    // Broadcast win to all clients then show locally
     if (socket) socket.emit('game:event', { type: 'level_load', levelIndex: idx });
     showWin();
     return;
   }
-  if (socket) socket.emit('game:event', { type: 'level_load', levelIndex: idx });
-  loadLevel(idx).then(() => { gameState = 'playing'; });
+
+  // Broadcast the exact level index to ALL clients (including self via level_load handler)
+  // This ensures everyone loads the same level at the same time
+  if (socket) {
+    socket.emit('game:event', { type: 'level_load', levelIndex: idx });
+    console.log(`[Host] Emitted level_load index=${idx}`);
+  }
+  // Host also loads the level (same as clients will via the event they receive)
+  gameState = 'loading';
+  _doorReached.clear();
+  AUDIO._bgFile = null;
+  AUDIO.playBg('bg_game.mp3');
+  loadLevel(idx).then(() => {
+    gameState = 'playing';
+    console.log(`[Host] Advanced to level ${idx}`);
+  });
 }
 
 function broadcastAll(msg) {
@@ -2126,11 +2366,17 @@ function broadcastAll(msg) {
 function updatePingDisplay() {
   const el = document.getElementById('pingDisplay');
   if (!el) return;
-  const color = myPing < 80 ? '#00ff88' : myPing < 150 ? '#ffaa00' : '#ff2222';
+  const color = myPing < 60 ? '#00ff88' : myPing < 120 ? '#ffcc00' : myPing < 200 ? '#ff8800' : '#ff2222';
   const cMode = _getConnectionMode();
-  const mIcon = cMode === 'p2p' ? '⚡' : cMode === 'hybrid' ? '~' : '●';
-  const mTip  = cMode === 'p2p' ? 'Direct P2P' : cMode === 'hybrid' ? 'Mixed' : 'Server relay';
+  const mIcon = cMode === 'p2p' ? '⚡' : cMode === 'hybrid' ? '◑' : '●';
+  const mTip  = cMode === 'p2p'
+    ? `Direct P2P — ${myPing}ms`
+    : cMode === 'hybrid'
+    ? `Mixed P2P+relay — ${myPing}ms`
+    : `Server relay — ${myPing}ms (P2P not yet connected)`;
+  const quality = myPing < 60 ? 'GREAT' : myPing < 120 ? 'GOOD' : myPing < 200 ? 'OK' : 'POOR';
   el.innerHTML = `<span style="color:${color}" title="${mTip}">${mIcon}</span> ${myPing}ms`;
+  el.title = mTip;
 }
 
 function setStatus(id, msg, cls) {
@@ -3430,8 +3676,13 @@ function update() {
   // ── Platform dynamics ──
   if (!multiMode || isHost) updatePlatforms(elapsed);
 
-  // ── Traps (only host simulates authoritatively) ──
-  if (!multiMode || isHost) updateTraps();
+  // ── Traps ──
+  // All clients run trap PHYSICS locally (movement, animation) for smooth visuals.
+  // Only host runs trap TRIGGERS (player-proximity checks) authoritatively.
+  // Host broadcasts trap state 30x/sec and clients apply it — so any local drift
+  // is corrected within 33ms. This gives local responsiveness with host authority.
+  updateTraps();       // Everyone runs physics (triggers use all-player checks)
+  lerpTrapPositions(); // Clients smooth toward host-authoritative positions
 
   // ── Events ──
   if (!multiMode || isHost) processEvents(elapsed);
@@ -3672,9 +3923,8 @@ function updateTraps() {
             if (Math.abs(t.vx) < 0.5) t.vx = t.dx > 0 ? 0.5 : -0.5;
           }
         } else if (t.state === 'waiting') {
-          // Triggered by player proximity
-          const dist = Math.abs(player.x - (t.x + t.r));
-          if (dist < t.triggerDist) {
+          const _np = getNearestPlayer(t.x + t.r, t.y);
+          if (_np && Math.abs(_np.x + PLAYER_W/2 - (t.x + t.r)) < (t.triggerDist || 120)) {
             t.state = 'rolling';
             t.vx = t.dx;
           }
@@ -3722,10 +3972,9 @@ function updateTraps() {
       // ── NEW PHASE 3 TRAPS ────────────────────────
 
       case 'delayed_spike':
-        // Hidden until player is within popDelay ms of passing it
-        if (t.hidden && t.popDelay && player.alive) {
-          const dist = Math.abs(player.x - t.x);
-          if (dist < 60 && player.x > t.x - 80) {
+        if (t.hidden && t.popDelay) {
+          const _np = getNearestPlayer(t.x, t.y);
+          if (_np && Math.abs(_np.x - t.x) < 60 && _np.x > t.x - 80) {
             t.hidden = false;
             t._popTimer = t.popDelay;
           }
@@ -3738,33 +3987,44 @@ function updateTraps() {
         }
         break;
 
-      case 'gravity_spike':
-        // Falls when player is directly underneath
-        if (t.state === 'waiting' && player.alive) {
-          if (Math.abs((player.x + PLAYER_W/2) - (t.x + t.w/2)) < 20) {
+      case 'gravity_spike': {
+        if (t.state === 'waiting') {
+          const _np = getNearestPlayer(t.x + (t.w||32)/2, t.y);
+          if (_np && Math.abs(_np.x + PLAYER_W/2 - (t.x + (t.w||32)/2)) < 20) {
             t.state = 'falling';
             t.vy = 0;
           }
         }
         if (t.state === 'falling') {
-          t.vy = Math.min((t.vy || 0) + GRAVITY * 2.5, 22); // fast snap fall
+          t.vy = Math.min((t.vy || 0) + GRAVITY * 2.5, 22);
           t.y += t.vy;
           if (t.y > 600) t.state = 'gone';
         }
         break;
+      }
 
-      case 'magnetic_spike':
-        // Always rotates to face player and moves toward them
-        if (t.state === 'waiting' && player.alive) {
-          const dx = (player.x + PLAYER_W/2) - (t.x + t.w/2);
-          const dy = (player.y + PLAYER_H/2) - (t.y + t.h/2);
-          const len = Math.sqrt(dx*dx + dy*dy);
+      case 'magnetic_spike': {
+        const _np = getNearestPlayer(t.x + (t.w||32)/2, t.y + (t.h||32)/2);
+        if (_np) {
+          const dx = (_np.x + PLAYER_W/2) - (t.x + (t.w||32)/2);
+          const dy = (_np.y + PLAYER_H/2) - (t.y + (t.h||32)/2);
+          const len = Math.sqrt(dx*dx + dy*dy) || 1;
           const spd = t.speed || 5;
-          t.x += (dx / len) * spd;
-          t.y += (dy / len) * spd;
+          const maxRange = t.range || 300;
+          if (len < maxRange) {
+            t.x += (dx / len) * spd;
+            t.y += (dy / len) * spd;
+          } else {
+            // Return to origin slowly when no one in range
+            if (t._origX !== undefined) {
+              t.x += (t._origX - t.x) * 0.04;
+              t.y += (t._origY - t.y) * 0.04;
+            }
+          }
           t.angle = Math.atan2(dy, dx);
         }
         break;
+      }
 
       case 'boomerang_arrow':
         if (!t.state) t.state = 'forward';
@@ -3794,29 +4054,30 @@ function updateTraps() {
         }
         break;
 
-      case 'expanding_spike':
-        // Grows 4x when player is mid-air and approaching
-        if (player.alive && !player.onGround &&
-            Math.abs(player.x - t.x) < 200 && player.vy > 0) {
+      case 'expanding_spike': {
+        const _np = getNearestPlayer(t.x, t.y);
+        const _airborne = _np && !_np.onGround && Math.abs(_np.x - t.x) < 200 && (_np.vy||0) > 0;
+        if (_airborne) {
           t._scale = Math.min(4, (t._scale || 1) + 0.25);
         } else {
           t._scale = Math.max(1, (t._scale || 1) - 0.1);
         }
         break;
+      }
 
       case 'input_inversion_zone':
-        // Flip controls when player is inside zone
-        player.controlsFlipped = !!(
-          player.alive &&
-          player.x + PLAYER_W > t.x && player.x < t.x + t.w &&
-          player.y + PLAYER_H > t.y && player.y < t.y + t.h
+        // Flip local player controls when inside zone
+        player.controlsFlipped = player.alive && rectOverlap(
+          player.x, player.y, PLAYER_W, PLAYER_H, t.x, t.y, t.w, t.h
         );
+        // Note: remote players get their controls flipped on their own client
+        // (they run this same code with their local player reference)
         break;
 
-      case 'leap_of_faith_platform':
-        // Platform shifts right every time player has positive vx while jumping
+      case 'leap_of_faith_platform': {
         if (!t.state) t.state = 'alive';
-        if (player.alive && !player.onGround && player.vx > 1) {
+        const _np = getNearestPlayer(t.x, t.y);
+        if (_np && !_np.onGround && (_np.vx||0) > 1) {
           const now2 = Date.now();
           if (!t._lastShift || now2 - t._lastShift > 200) {
             t.x += (t.shiftPerJump || 15);
@@ -3824,29 +4085,29 @@ function updateTraps() {
           }
         }
         break;
+      }
 
-      case 'shrinking_wall':
-        // Shrinks to crush player once they're close
+      case 'shrinking_wall': {
         if (!t._origH) { t._origH = t.h; t._origY = t.y; }
-        const dist2 = Math.abs(player.x - (t.x + t.w/2));
-        if (player.alive && dist2 < 200) {
+        const _np = getNearestPlayer(t.x + t.w/2, t.y);
+        if (_np && Math.abs(_np.x - (t.x + t.w/2)) < 200) {
           t.h = Math.max(0, t.h - 1.5);
           t.y = t._origY + (t._origH - t.h);
         }
         break;
+      }
 
       case 'sike_goal':
-      case 'fake_exit':
-        // Draw as fake door at own position — never touch the real door object.
-        // When player gets within 50px, teleport the fake to spawn area (not the real door).
-        if (player.alive) {
-          // Init fake position from trap's own coords
-          if (t._fakeX === undefined) { t._fakeX = t.x; t._fakeY = t.y; }
-          const gx = t._fakeX + 16, gy = t._fakeY + 32;
-          const pdist = Math.sqrt((player.x - gx) ** 2 + (player.y - gy) ** 2);
-          if (pdist < 50 && !t._triggered) {
+      case 'fake_exit': {
+        if (t._fakeX === undefined) { t._fakeX = t.x; t._fakeY = t.y; }
+        const gx = t._fakeX + 16, gy = t._fakeY + 32;
+        // React to nearest player — any player approaching triggers the troll
+        const _np = getNearestPlayer(gx, gy);
+        if (_np && !t._triggered) {
+          const pdist = Math.sqrt((_np.x - gx) ** 2 + (_np.y - gy) ** 2);
+          if (pdist < 50) {
             t._triggered = true;
-            // Move fake door far away — never touch real door
+            // Move fake door far away — use local player spawn as reference
             t._fakeX = player.spawnX + 30;
             t._fakeY = player.spawnY - TILE * 2;
             shakeTimer = 20;
@@ -3855,30 +4116,34 @@ function updateTraps() {
           }
         }
         break;
+      }
 
-      case 'fake_loading_screen':
-        // Briefly show a fake "loading" overlay that kills if player stops
-        if (t.triggerX && player.x >= t.triggerX && !t._active) {
-          t._active = true;
-          t._shownAt = Date.now();
-          // Show fake overlay
-          const fakeEl = document.getElementById('fakeLoadOverlay');
-          if (fakeEl) { fakeEl.style.display = 'flex'; }
+      case 'fake_loading_screen': {
+        if (t.triggerX && !t._active) {
+          // Any player crossing triggerX activates the fake screen
+          const _anyOver = (player.alive && player.x >= t.triggerX) ||
+            [...remotePlayers.values()].some(rp => rp.alive && rp.x >= t.triggerX);
+          if (_anyOver) {
+            t._active = true;
+            t._shownAt = Date.now();
+            const fakeEl = document.getElementById('fakeLoadOverlay');
+            if (fakeEl) fakeEl.style.display = 'flex';
+          }
         }
         if (t._active) {
           const age = Date.now() - (t._shownAt || 0);
           if (age > 2500) {
-            // Dismiss
             t._active = false;
             const fakeEl = document.getElementById('fakeLoadOverlay');
             if (fakeEl) fakeEl.style.display = 'none';
           }
-          // Kill player if they stop moving during fake screen
-          if (Math.abs(player.vx) < 0.5 && age > 500 && age < 2500) {
+          // Kill local player if they stop moving
+          if (player.alive && Math.abs(player.vx) < 0.5 && age > 500 && age < 2500) {
             killPlayer("KEEP MOVING NEXT TIME.");
           }
         }
         break;
+      }
 
       case 'moving_platform':
         if (t.dir === undefined) t.dir = 1;
@@ -3928,43 +4193,45 @@ function updateTraps() {
         }
         break;
 
-      case 'shrinking_gap_platform':
-        // Platform moves away when player is jumping over the gap
+      case 'shrinking_gap_platform': {
         if (!t._origX) t._origX = t.x;
-        if (player.alive && !player.onGround && player.vx > 0 &&
-            player.x > t.x - 200 && player.x < t.x + 50) {
+        const _np = getNearestPlayer(t.x, t.y);
+        if (_np && !_np.onGround && (_np.vx||0) > 0 &&
+            _np.x > t.x - 200 && _np.x < t.x + 50) {
           t.x += t.shiftSpeed || 8;
           t.x = Math.min(t._origX + (t.maxShift || 300), t.x);
         }
-        // Slowly return when player is not jumping toward it
-        if (player.onGround || player.vx <= 0) {
+        if (!_np || _np.onGround || (_np.vx||0) <= 0) {
           t.x = Math.max(t._origX, t.x - 1);
         }
         break;
+      }
 
-      case 'jumpscare_spike_platform':
-        // Spikes pop up when player falls toward this platform (vy > 0, close to surface)
+      case 'jumpscare_spike_platform': {
         if (!t.spikesActive) t.spikesActive = false;
-        if (!t.decoyActive)  t.decoyActive  = true; // starts as safe platform
-        if (player.alive && player.vy > 2) {
-          const distY = t.y - (player.y + PLAYER_H);
-          if (distY > 0 && distY < 40 &&
-              player.x + PLAYER_W > t.x && player.x < t.x + t.w) {
-            t.spikesActive = true; // spikes pop!
+        if (!t.decoyActive)  t.decoyActive  = true;
+        // Check ALL players falling toward this platform
+        const _allP = getAllPlayerStates();
+        for (const _p of _allP) {
+          if (!_p.alive) continue;
+          if ((_p.vy||0) > 2) {
+            const distY = t.y - (_p.y + PLAYER_H);
+            if (distY > 0 && distY < 40 &&
+                _p.x + PLAYER_W > t.x && _p.x < t.x + t.w) {
+              t.spikesActive = true;
+            }
           }
         }
-        // On second run, platform C: it slides toward player at apex then drops
-        if (t.variant === 'slide_drop' && player.alive) {
+        const _np = getNearestPlayer(t.x + t.w/2, t.y);
+        if (t.variant === 'slide_drop' && _np) {
           if (!t._state) t._state = 'waiting';
-          if (t._state === 'waiting' && player.vy < -2 &&
-              Math.abs(player.x - t.x) < 300) {
+          if (t._state === 'waiting' && (_np.vy||0) < -2 &&
+              Math.abs(_np.x - t.x) < 300) {
             t._state = 'sliding';
           }
           if (t._state === 'sliding') {
-            // Slide toward player horizontally
-            const dx = (player.x + PLAYER_W/2) - (t.x + t.w/2);
+            const dx = (_np.x + PLAYER_W/2) - (t.x + t.w/2);
             t.x += Math.sign(dx) * 3;
-            // Once close, drop
             if (Math.abs(dx) < 30) { t._state = 'dropping'; t._vy = 0; }
           }
           if (t._state === 'dropping') {
@@ -3975,6 +4242,7 @@ function updateTraps() {
         }
         if (!t._origY) t._origY = t.y;
         break;
+      }
 
       case 'ceiling_crusher':
         if (!t._phase) t._phase = 'idle';
@@ -4604,16 +4872,10 @@ function checkPlayerCollisions(lvl) {
 
     if (!rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, p.x, p.y, p.w, p.h)) return;
 
-    // Floor hole: only bypass platforms that are AT the hole's y-level (the actual floor).
-    // Elevated platforms above the hole must still collide normally.
-    // Rule: skip collision only when:
-    //   1. Player center-x is inside the hole's x-range
-    //   2. The platform overlaps the hole's x-range
-    //   3. The platform's TOP is within 8px of the hole's TOP (same floor level)
     if (p.type === 'solid' || p.type === 'ice' || p.type === 'moving_platform') {
       for (const hole of openHoles) {
         const playerCenterX = player.x + PLAYER_W / 2;
-        const platformIsAtFloor = Math.abs(p.y - hole.y) < 8; // same y-level as hole
+        const platformIsAtFloor = Math.abs(p.y - hole.y) < 8;
         if (platformIsAtFloor &&
             playerCenterX > hole.x && playerCenterX < hole.x + hole.w &&
             hole.x < p.x + p.w && hole.x + hole.w > p.x) {
@@ -4670,32 +4932,98 @@ function checkTrapCollisions() {
         if (t.state === 'gone') return;
         let hit = false;
         let msg = 'A TRAP GOT THEM.';
-        // Check common deadly traps for remote players
+        const rx=rp.x, ry=rp.y;
+
+        // ── All spike variants ──
         if ((t.type==='spike_up'||t.type==='spike_down'||t.type==='spike_moving_h'||
-             t.type==='spike_moving_v'||t.type==='chasing_spike') &&
-             rectOverlap(rp.x+4, rp.y+4, PLAYER_W-8, PLAYER_H-8, t.x, t.y, t.w||32, t.h||32)) {
-          hit = true; msg = 'SPIKE GOT THEM.';
-        }
-        if (t.type==='lava_pool' && rectOverlap(rp.x+2, rp.y+2, PLAYER_W-4, PLAYER_H-4, t.x, t.y, t.w, t.h)) {
-          hit = true; msg = 'LAVA GOT THEM.';
-        }
-        if (t.type==='floor_hole' && t.state==='open' &&
-            rp.x+PLAYER_W > t.x && rp.x < t.x+t.w && rp.y+PLAYER_H > t.y && rp.y < t.y+t.h) {
-          hit = true; msg = 'FELL IN THE HOLE.';
-        }
+             t.type==='spike_moving_v'||t.type==='chasing_spike'||t.type==='delayed_spike') &&
+             rectOverlap(rx+4,ry+4,PLAYER_W-8,PLAYER_H-8, t.x,t.y, t.w||32,t.h||32))
+          { hit=true; msg='SPIKE.'; }
+
+        // ── Holes (floor_hole, expanding_hole, smart_hole) ──
+        if ((t.type==='floor_hole'||t.type==='expanding_hole') && t.state==='open' &&
+            rx+PLAYER_W > t.x && rx < t.x+t.w && ry+PLAYER_H > t.y && ry < t.y+t.h)
+          { hit=true; msg='FELL IN THE HOLE.'; }
         if (t.type==='smart_hole' && !t.fake && t.state==='open' &&
-            rp.x+PLAYER_W > t.x && rp.x < t.x+t.w && rp.y+PLAYER_H > t.y && rp.y < t.y+t.h) {
-          hit = true; msg = 'SURPRISE HOLE.';
-        }
+            rx+PLAYER_W > t.x && rx < t.x+t.w && ry+PLAYER_H > t.y && ry < t.y+t.h)
+          { hit=true; msg='SURPRISE HOLE.'; }
+
+        // ── Rotating / circular ──
         if (t.type==='saw_blade') {
-          const cx=t.x+t.r, cy=t.y+t.r, px=rp.x+PLAYER_W/2, py=rp.y+PLAYER_H/2;
-          if (Math.sqrt((cx-px)**2+(cy-py)**2) < t.r+8) { hit=true; msg='SAW BLADE.'; }
+          const cx=t.x+t.r,cy=t.y+t.r;
+          if(Math.sqrt((cx-rx-PLAYER_W/2)**2+(cy-ry-PLAYER_H/2)**2)<t.r+8){hit=true;msg='SAW BLADE.';}
         }
-        if (t.type==='wall_moving' && rectOverlap(rp.x, rp.y, PLAYER_W, PLAYER_H, t.x, t.y, t.w, t.h)) {
-          hit = true; msg = 'WALL CRUSHED THEM.';
+        if (t.type==='spike_wheel') {
+          const blades=8;
+          for(let bi=0;bi<blades;bi++){
+            const a=(t.angle||0)+(Math.PI*2/blades)*bi;
+            const tx=t.cx+Math.cos(a)*t.r,ty=t.cy+Math.sin(a)*t.r;
+            if(tx>rx&&tx<rx+PLAYER_W&&ty>ry&&ty<ry+PLAYER_H){hit=true;msg='SPIKE WHEEL.';break;}
+          }
         }
+        if (t.type==='boulder' && t.state==='rolling') {
+          const cx=t.x+t.r;
+          if(Math.sqrt((cx-rx-PLAYER_W/2)**2+(t.y-ry-PLAYER_H/2)**2)<t.r+10){hit=true;msg='BOULDER.';}
+        }
+
+        // ── Environment ──
+        if (t.type==='lava_pool' && rectOverlap(rx+2,ry+2,PLAYER_W-4,PLAYER_H-4,t.x,t.y,t.w,t.h))
+          { hit=true; msg='LAVA.'; }
+        if (t.type==='wall_moving' && rectOverlap(rx,ry,PLAYER_W,PLAYER_H,t.x,t.y,t.w,t.h))
+          { hit=true; msg='CRUSHED BY WALL.'; }
+        if (t.type==='acid_drip' && t.drops) {
+          t.drops.forEach(d=>{
+            if(Math.sqrt((d.x-rx-PLAYER_W/2)**2+(d.y-ry-PLAYER_H/2)**2)<d.size+8) hit=true;
+          });
+          if(hit) msg='ACID.';
+        }
+        if (t.type==='electro_fence' && t.on &&
+            rectOverlap(rx+2,ry+2,PLAYER_W-4,PLAYER_H-4,t.x,t.y,t.w,t.h))
+          { hit=true; msg='ELECTROCUTED.'; }
+        if (t.type==='laser' && t.on) {
+          if(t.axis==='h' && rx+PLAYER_W>t.x && rx<t.x+t.w && ry+PLAYER_H>t.y-4 && ry<t.y+4)
+            { hit=true; msg='LASER.'; }
+          else if(t.axis!=='h' && rx+PLAYER_W>t.x-4 && rx<t.x+4 && ry+PLAYER_H>t.y && ry<t.y+t.h)
+            { hit=true; msg='LASER.'; }
+        }
+        if (t.type==='piston' && (t.extended||0)>0.1) {
+          const hx=t.hitX??t.x,hy=t.hitY??t.y,hw=t.hitW??t.w,hh=t.hitH??t.h;
+          if(rectOverlap(rx,ry,PLAYER_W,PLAYER_H,hx,hy,hw,hh)){hit=true;msg='PISTON.';}
+        }
+
+        // ── Ceilings ──
+        if (t.type==='ceiling_crusher' && (t._phase==='dropping'||t._phase==='resting') &&
+            rectOverlap(rx,ry,PLAYER_W,PLAYER_H,t.x,t.y,t.w,t.h))
+          { hit=true; msg='CEILING CRUSHER.'; }
+        if (t.type==='whole_ceiling' && t._phase==='dropping' &&
+            t.y+t.h >= ry+4 && rx+PLAYER_W>t.x && rx<t.x+t.w)
+          { hit=true; msg='CEILING CRUSHED THEM.'; }
+
+        // ── Phase 2 special spikes ──
+        if (t.type==='gravity_spike' && t.state==='falling' &&
+            rectOverlap(rx+4,ry+4,PLAYER_W-8,PLAYER_H-8,t.x,t.y,t.w||32,t.h||32))
+          { hit=true; msg='GRAVITY SPIKE.'; }
+        if (t.type==='magnetic_spike' &&
+            rectOverlap(rx+4,ry+4,PLAYER_W-8,PLAYER_H-8,t.x,t.y,t.w||32,t.h||32))
+          { hit=true; msg='MAGNETIC SPIKE.'; }
+        if (t.type==='expanding_spike') {
+          const sc=t._scale||1,ew=(t.w||16)*sc,eh=(t.h||16)*sc;
+          const ex=t.x-(ew-(t.w||16))/2,ey=t.y-(eh-(t.h||16))/2;
+          if(rectOverlap(rx+4,ry+4,PLAYER_W-8,PLAYER_H-8,ex,ey,ew,eh)){hit=true;msg='EXPANDING SPIKE.';}
+        }
+        if (t.type==='boomerang_arrow' &&
+            rectOverlap(rx+4,ry+4,PLAYER_W-8,PLAYER_H-8,t.x,t.y,t.w||24,t.h||12))
+          { hit=true; msg='BOOMERANG.'; }
+        if (t.type==='jumpscare_spike_platform' && t.spikesActive &&
+            rectOverlap(rx+4,ry+4,PLAYER_W-8,PLAYER_H-8,t.x,t.y-20,t.w,24))
+          { hit=true; msg='SURPRISE SPIKES.'; }
+
+        // ── Void fall ──
+        if (ry > 600 || ry < -200) { hit=true; msg='FELL INTO THE VOID.'; }
+
         if (hit && socket) {
           socket.emit('game:event', { type: 'remote_trap_kill', slot, msg });
+          rp.alive = false; // optimistic local mark — prevents double-fire
         }
       });
     });
@@ -5098,30 +5426,34 @@ function checkDoor(lvl) {
   if (!rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, door.x, door.y, door.w, door.h)) return;
 
   if (!multiMode) {
-    // Solo: reach door = level clear immediately
     levelClear();
     return;
   }
 
-  // Multiplayer: track that this player reached the door
-  if (!_doorReached.has(myPlayerIdx)) {
-    _doorReached.add(myPlayerIdx);
-    // Broadcast to others so they know
-    if (socket) socket.emit('game:event', {
-      type: 'player_at_door',
-      slot: myPlayerIdx,
-      name: playerName,
-    });
+  // Multiplayer — each player reports reaching door exactly once
+  if (_doorReached.has(myPlayerIdx)) return; // already reported
+  _doorReached.add(myPlayerIdx);
+  console.log(`[MP] Local player ${myPlayerIdx} reached door — broadcasting player_at_door`);
 
-    // Check if ALL connected players have reached the door
-    const totalPlayers = 1 + remotePlayers.size; // local + remotes
+  // Broadcast to room (server relays to everyone including host)
+  if (socket) socket.emit('game:event', {
+    type: 'player_at_door',
+    slot: myPlayerIdx,
+    name: playerName,
+  });
+
+  const totalPlayers = 1 + remotePlayers.size;
+  if (isHost) {
+    // Host also processes their own door arrival
     if (_doorReached.size >= totalPlayers) {
+      console.log('[Host] All players at door (including self) — clearing level');
       levelClear();
     } else {
-      // Show "waiting" indicator
-      const waiting = totalPlayers - _doorReached.size;
-      _showDoorWait(waiting);
+      _showDoorWait(totalPlayers - _doorReached.size);
     }
+  } else {
+    // Non-host: just show waiting indicator, host will trigger level clear
+    _showDoorWait(totalPlayers - _doorReached.size);
   }
 }
 
@@ -5209,11 +5541,12 @@ function killPlayer(msg) {
   }
 
   if (multiMode && socket) {
-    // Broadcast death — this triggers ALL other players to die & restart together
+    const deathMsg = playerName + ' DIED!';
+    console.log(`[MP] Local player died — broadcasting player_died slot=${myPlayerIdx}`);
     socket.emit('game:event', {
       type: 'player_died',
       slot: myPlayerIdx,
-      msg:  playerName + ' DIED — RESTARTING!',
+      msg:  deathMsg,
     });
   }
 
@@ -5226,15 +5559,35 @@ function killPlayer(msg) {
 
 function respawnPlayer() {
   hideOverlay('deathOverlay');
-  // Restart bg music fresh from the beginning — no stale position
-  AUDIO._bgFile = null; // clear cache so playBg forces a reload
-  AUDIO.playBg('bg_game.mp3');
-  loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
+  console.log(`[MP] respawnPlayer — isHost=${isHost}, level=${currentLevelIndex}`);
+
   if (multiMode && socket) {
     if (isHost) {
+      // Host broadcasts level_load — ALL clients (including host) will reload
+      console.log(`[Host] Broadcasting level_load for respawn — index=${currentLevelIndex}`);
       socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
+    } else {
+      // Non-host: wait for host to broadcast level_load.
+      // If host doesn't respond in 3s, request it.
+      console.log('[Client] Waiting for host to broadcast level_load for respawn');
+      setTimeout(() => {
+        if (gameState === 'dead') {
+          console.warn('[Client] Host did not restart — requesting via socket');
+          socket.emit('game:event', { type: 'request_restart' });
+        }
+      }, 3000);
+      return; // Do NOT load level locally — wait for host broadcast
     }
   }
+
+  // Solo mode or host loading locally (host also gets level_load from itself via server echo)
+  if (!multiMode) {
+    AUDIO._bgFile = null;
+    AUDIO.playBg('bg_game.mp3');
+    loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
+  }
+  // In multiMode as host, the level_load event broadcast will trigger our own reload
+  // via the socket.on('game:event', level_load) handler — no need to load here
 }
 
 function levelClear() {
@@ -5258,9 +5611,15 @@ function levelClear() {
     document.getElementById('levelStats').innerHTML += extra;
 
     const btn = document.getElementById('nextLevelBtn');
-    if (btn) btn.style.display = isHost ? 'block' : 'none';
+    if (btn) {
+      btn.style.display = isHost ? 'block' : 'none';
+      btn.textContent = 'NEXT LEVEL ▶';
+    }
     if (!isHost) {
-      document.getElementById('levelStats').innerHTML += '<br><br>WAITING FOR HOST...';
+      document.getElementById('levelStats').innerHTML += '<br><br><span style="color:#ffcc00">⏳ WAITING FOR HOST TO ADVANCE...</span>';
+      console.log('[Client] Level clear — waiting for host level_load event');
+    } else {
+      console.log('[Host] Level clear — showing NEXT button');
     }
     // Host triggers advance; non-host just waits for level_load event
     if (isHost) {
@@ -5274,14 +5633,20 @@ function levelClear() {
 
 function nextLevel() {
   hideOverlay('levelClearOverlay');
-  if (multiMode && !isHost) return; // only host advances
+  if (multiMode) {
+    // In multiplayer, only host can advance — non-hosts just wait for level_load event
+    if (!isHost) {
+      console.log('[Client] nextLevel called but not host — ignoring (waiting for host level_load)');
+      return;
+    }
+    hostAdvanceLevel();
+    return;
+  }
+  // Solo mode
   currentLevelIndex++;
   if (currentLevelIndex >= levelOrder.length) {
-    if (multiMode && socket) socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
     showWin();
   } else {
-    if (multiMode && socket) socket.emit('game:event', { type: 'level_load', levelIndex: currentLevelIndex });
-    // Start next level's music fresh from beginning
     AUDIO._bgFile = null;
     AUDIO.playBg('bg_game.mp3');
     loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
