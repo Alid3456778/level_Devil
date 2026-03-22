@@ -87,7 +87,7 @@
       "h": 416
     },
     {
-      "type": "fake_floor_trap",
+      "type": "fake_platform",
       "x": 240,
       "y": 416,
       "w": 64,
@@ -95,7 +95,7 @@
       "state": "solid"
     },
     {
-      "type": "fake_floor_trap",
+      "type": "fake_platform",
       "x": 700,
       "y": 416,
       "w": 64,
@@ -103,7 +103,7 @@
       "state": "solid"
     },
     {
-      "type": "fake_floor_trap",
+      "type": "fake_platform",
       "x": 1150,
       "y": 416,
       "w": 64,

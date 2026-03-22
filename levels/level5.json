@@ -108,12 +108,17 @@
     },
     {
       "type": "magnetic_spike",
-      "x": 1550,
-      "y": 32,
+      "x": 220,
+      "y": 70,
       "w": 32,
       "h": 32,
       "state": "waiting",
-      "speed": 4
+      "speed": 4,
+      "range": 420,
+      "triggerX": 170,
+      "triggerY": 0,
+      "triggerW": 180,
+      "triggerH": 480
     }
   ],
   "events": [],

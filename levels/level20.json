@@ -1,7 +1,7 @@
 {
   "id": 20, "name": "WEIGHT SEESAW",
   "bgColor": "#1a0808", "width": 2000, "height": 560,
-  "spawnX": 60, "spawnY": 460,
+  "spawnX": 120, "spawnY": 460,
   "platforms": [
     { "x":0,   "y":496, "w":400,  "h":64, "type":"solid" },
     { "x":0,   "y":0,   "w":2000, "h":32, "type":"solid" },

@@ -24,6 +24,6 @@
   ],
   "events": [],
   "door": { "x":1700,"y":352, "locked":true },
-  "key":  { "x":720, "y":192, "w":28, "h":28, "collected":false },
+  "key":  { "x":760, "y":192, "w":28, "h":28, "collected":false },
   "gravity": 1
 }

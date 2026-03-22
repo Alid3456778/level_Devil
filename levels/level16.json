@@ -18,7 +18,7 @@
       "x":32, "y":32, "w":1536, "h":48,
       "_origY":32, "_phase":"idle", "_speed":0,
       "triggerOnMove":true,
-      "warnDuration":90,
+      "warnDuration":120,
       "maxSpeed":1.5,
       "accel":0.05,
       "floorY":416

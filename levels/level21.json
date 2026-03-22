@@ -1,7 +1,7 @@
 {
   "id": 21, "name": "SPLIT SCREEN",
   "bgColor": "#0a001a", "width": 1800, "height": 480,
-  "spawnX": 60, "spawnY": 380,
+  "spawnX": 120, "spawnY": 380,
   "platforms": [
     { "x":0,    "y":416, "w":1800, "h":64, "type":"solid" },
     { "x":0,    "y":0,   "w":1800, "h":32, "type":"solid" },

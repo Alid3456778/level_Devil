@@ -188,6 +188,49 @@
     margin-right: 4px;
     font-size: clamp(8px,2vw,10px);
   }
+  #authFetchPanel {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    min-width: min(320px, 84vw);
+    padding: clamp(12px, 2.8vw, 18px) clamp(16px, 4vw, 26px);
+    background:
+      linear-gradient(180deg, rgba(44, 24, 12, 0.96), rgba(20, 10, 6, 0.98));
+    border: 3px solid #f0a830;
+    box-shadow:
+      0 0 0 3px rgba(20, 10, 6, 0.95),
+      0 0 22px rgba(240, 168, 48, 0.22);
+    color: #ffd48a;
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(7px, 1.6vw, 10px);
+    line-height: 1.8;
+    text-align: center;
+    letter-spacing: 1px;
+    z-index: 12;
+    display: none;
+    pointer-events: none;
+  }
+  #authFetchPanel.open { display: block; }
+  #authFetchPanel::before {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border: 1px solid rgba(255, 214, 140, 0.22);
+    pointer-events: none;
+  }
+  #authFetchPanel .dots {
+    display: inline-block;
+    min-width: 34px;
+    text-align: left;
+    color: #ffefb8;
+    animation: authFetchDots 1s steps(4, end) infinite;
+  }
+  @keyframes authFetchDots {
+    0% { opacity: 0.35; }
+    50% { opacity: 1; }
+    100% { opacity: 0.35; }
+  }
   @keyframes tooltipBlink {
     0%, 100% { box-shadow: 0 0 0 1px #0a0a0f, 0 0 0 3px #f0a830, 0 0 16px rgba(240,168,48,0.3); }
     50%       { box-shadow: 0 0 0 1px #0a0a0f, 0 0 0 3px #c87820, 0 0 6px rgba(240,168,48,0.1); }
@@ -950,6 +993,10 @@
     <span style="color:#ff8800;">BETTER EXP!</span>
   </div>
 
+  <div id="authFetchPanel" aria-hidden="true">
+    FETCHING USER<span class="dots">...</span>
+  </div>
+
   <div class="skull-deco">💀</div>
   <div class="title">LEVEL DEVIL</div>
   <!-- Minecraft-style rotating tagline -->
@@ -1015,6 +1062,7 @@
 
 <!-- ══════════════ MODE SELECT ══════════════ -->
 <div id="modeScreen" class="screen">
+  <button id="nsFullscreenBtn" onclick="nsToggleFullscreen()" title="Fullscreen">⛶</button>
   <div class="title" style="font-size:clamp(14px,3vw,26px);color:var(--red);text-shadow:var(--glow);margin-bottom:8px;">SELECT MODE</div>
   <div class="mode-cards">
     <div class="mode-card" onclick="startSoloGame()">
@@ -1655,6 +1703,7 @@ function connectSocket(cb) {
       case 'level_load': {
         // Authoritative level load from host — ALL clients use this exact index
         const newIdx = data.levelIndex;
+        const preserveLevelDeaths = newIdx === currentLevelIndex;
         console.log(`[MP] level_load received — index=${newIdx}, isHost=${isHost}`);
         currentLevelIndex = newIdx;
         _doorReached.clear();
@@ -1663,7 +1712,7 @@ function connectSocket(cb) {
         gameState = 'loading';
         AUDIO._bgFile = null;
         AUDIO.playBg('bg_game.mp3');
-        loadLevel(currentLevelIndex).then(() => {
+        loadLevel(currentLevelIndex, { preserveLevelDeaths }).then(() => {
           gameState = 'playing';
           console.log(`[MP] Level ${newIdx} loaded and playing`);
           if (!isHost && socket) {
@@ -1790,7 +1839,7 @@ function connectSocket(cb) {
           gameState = 'loading';
           AUDIO._bgFile = null;
           AUDIO.playBg('bg_game.mp3');
-          loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
+          loadLevel(currentLevelIndex, { preserveLevelDeaths: true }).then(() => { gameState = 'playing'; });
         }
         break;
       }
@@ -3217,6 +3266,38 @@ function getLevelSync(idx) {
   return LEVELS[realIdx] || null;
 }
 
+function normalizePlatformDef(p) {
+  const out = { ...p };
+
+  if (!out.type) out.type = 'solid';
+
+  if (out.type === 'fake_platform') {
+    out.type = 'fake_floor';
+  }
+
+  if (out.type === 'disappearing_ground') {
+    out.type = 'disappearing_ground';
+    out.state = out.state || 'waiting';
+  }
+
+  if (out.type === 'moving_platform') {
+    out.state = out.state || (out.active === false ? 'idle' : 'moving');
+  }
+
+  return out;
+}
+
+function normalizeTrapDef(t) {
+  const out = { ...t };
+
+  if (out.type === 'fake_floor_trap' || out.type === 'fake_platform') {
+    out.type = 'fake_floor';
+    out.state = out.state || 'solid';
+  }
+
+  return out;
+}
+
 // ════════════════════════════════════════════════
 //  PHASE 2: LEVEL RANDOMIZER + LOBBY OPTIONS
 // ════════════════════════════════════════════════
@@ -3940,11 +4021,19 @@ function _authHeaders() {
   return h;
 }
 
+function _authSetFetchingUser(show) {
+  const panel = document.getElementById('authFetchPanel');
+  if (!panel) return;
+  panel.classList.toggle('open', !!show);
+  panel.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+
 // Called on page load — restore session from localStorage
 async function authAutoLogin() {
   try {
     const stored = JSON.parse(localStorage.getItem(AUTH_TOKEN_KEY) || 'null');
     if (!stored?.token) return;
+    _authSetFetchingUser(true);
     // Verify token is still valid with server
     const res = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + stored.token } });
     const data = await res.json();
@@ -3960,7 +4049,11 @@ async function authAutoLogin() {
       if (liMsg) { liMsg.className = 'auth-msg ok'; liMsg.textContent = 'WELCOME BACK, ' + data.username.toUpperCase() + '!'; }
       setTimeout(() => { _dismissNsTooltip(); goToModeSelect(); }, 1200);
     }
-  } catch (e) { console.log('[Auth] Auto-login failed:', e.message); }
+    _authSetFetchingUser(false);
+  } catch (e) {
+    _authSetFetchingUser(false);
+    console.log('[Auth] Auto-login failed:', e.message);
+  }
 }
 
 async function authLogin() {
@@ -4246,14 +4339,15 @@ function startGame() {
   });
 }
 
-async function loadLevel(idx) {
+async function loadLevel(idx, opts = {}) {
+  const preserveLevelDeaths = !!opts.preserveLevelDeaths;
   const realIdx = levelOrder.length > 0 ? levelOrder[idx] : idx;
   const lvl = await fetchLevel(realIdx);
   if (!lvl) { showWin(); return; }
 
   // Deep clone level data
-  platforms = lvl.platforms.map(p => ({...p}));
-  traps     = lvl.traps.map(t => ({...t}));
+  platforms = lvl.platforms.map(p => normalizePlatformDef(p));
+  traps     = lvl.traps.map(t => normalizeTrapDef(t));
   events    = lvl.events.map(e => ({...e}));
   door      = { ...lvl.door, w: TILE, h: TILE*2, open: false };
   key       = lvl.key ? { ...lvl.key, collected: false } : null;
@@ -4322,7 +4416,7 @@ async function loadLevel(idx) {
     }
   });
 
-  levelDeaths = 0;
+  if (!preserveLevelDeaths) levelDeaths = 0;
   levelStartTime = Date.now();
   shakeTimer = 0;
   cam.x = 0; cam.y = 0;
@@ -4486,9 +4580,30 @@ function updatePlatforms(elapsed) {
         if (p.y > 600) p.state = 'gone';
       }
     }
-    if (p.type === 'crumble' && p.state === 'crumbling') {
+    if ((p.type === 'crumble' || p.type === 'fake_floor') && p.state === 'crumbling') {
       p.crumbleTimer++;
       if (p.crumbleTimer > 30) { p.state = 'gone'; }
+    }
+    if (p.type === 'disappearing_ground') {
+      if (!p.state) p.state = 'waiting';
+      if (p.state === 'waiting' && elapsed >= (p.delay || p.startDelay || 1000)) {
+        p.state = 'crumbling';
+        p.crumbleTimer = 0;
+      } else if (p.state === 'crumbling') {
+        p.crumbleTimer = (p.crumbleTimer || 0) + 1;
+        if (p.crumbleTimer > (p.crumbleFrames || 24)) {
+          if (p.fallAfterDisappear) {
+            p.state = 'falling';
+            p.vy = 0;
+          } else {
+            p.state = 'gone';
+          }
+        }
+      } else if (p.state === 'falling') {
+        p.vy = (p.vy || 0) + GRAVITY * 0.8;
+        p.y += p.vy;
+        if (p.y > 700) p.state = 'gone';
+      }
     }
     if (p.type === 'moving_platform') {
       p._prevX = p.x;
@@ -4758,6 +4873,32 @@ function updateTraps() {
       }
 
       case 'magnetic_spike': {
+        if (t._origX === undefined) {
+          t._origX = t.x;
+          t._origY = t.y;
+        }
+
+        if (t._awakened !== true) {
+          if (t.triggerX !== undefined || t.triggerY !== undefined || t.triggerW !== undefined || t.triggerH !== undefined) {
+            const tx = t.triggerX ?? t.x - 48;
+            const ty = t.triggerY ?? 0;
+            const tw = t.triggerW ?? ((t.w || 32) + 96);
+            const th = t.triggerH ?? 480;
+            if (anyPlayerInRect(tx, ty, tw, th)) {
+              t._awakened = true;
+            }
+          } else {
+            t._awakened = true;
+          }
+        }
+
+        if (!t._awakened) {
+          t.x += (t._origX - t.x) * 0.12;
+          t.y += (t._origY - t.y) * 0.12;
+          t.angle = t.angle || 0;
+          break;
+        }
+
         const _np = getNearestPlayer(t.x + (t.w||32)/2, t.y + (t.h||32)/2);
         if (_np) {
           const dx = (_np.x + PLAYER_W/2) - (t.x + (t.w||32)/2);
@@ -5765,7 +5906,7 @@ function checkPlayerCollisions(lvl) {
 
     if (!rectOverlap(player.x, player.y, PLAYER_W, PLAYER_H, p.x, p.y, p.w, p.h)) return;
 
-    if (p.type === 'solid' || p.type === 'ice' || p.type === 'moving_platform') {
+    if (p.type === 'solid' || p.type === 'ice' || p.type === 'moving_platform' || p.type === 'fake_floor' || p.type === 'disappearing_ground') {
       for (const hole of openHoles) {
         const playerCenterX = player.x + PLAYER_W / 2;
         const platformIsAtFloor = Math.abs(p.y - hole.y) < 8;
@@ -5791,7 +5932,7 @@ function checkPlayerCollisions(lvl) {
         if (!player.gravityFlipped) {
           player.onGround = true;
           if (p.type === 'ice') player.onIce = true;
-          if (p.type === 'crumble' && p.state === 'solid') {
+          if ((p.type === 'crumble' || p.type === 'fake_floor') && p.state === 'solid') {
             p.state = 'crumbling';
             p.crumbleTimer = 0;
           }
@@ -5802,7 +5943,7 @@ function checkPlayerCollisions(lvl) {
         if (player.gravityFlipped) {
           player.onGround = true;
           if (p.type === 'ice') player.onIce = true;
-          if (p.type === 'crumble' && p.state === 'solid') {
+          if ((p.type === 'crumble' || p.type === 'fake_floor') && p.state === 'solid') {
             p.state = 'crumbling';
             p.crumbleTimer = 0;
           }
@@ -6479,7 +6620,7 @@ function respawnPlayer() {
   if (!multiMode) {
     AUDIO._bgFile = null;
     AUDIO.playBg('bg_game.mp3');
-    loadLevel(currentLevelIndex).then(() => { gameState = 'playing'; });
+    loadLevel(currentLevelIndex, { preserveLevelDeaths: true }).then(() => { gameState = 'playing'; });
   }
   // In multiMode as host, the level_load event broadcast will trigger our own reload
   // via the socket.on('game:event', level_load) handler — no need to load here
@@ -6696,28 +6837,22 @@ function drawPlatforms() {
   platforms.forEach(p => {
     if (p.state === 'gone') return;
 
-    // Level Devil palette: warm golden yellow platforms on brown bg
-    let topColor  = '#f5c842'; // bright top face
-    let midColor  = '#d4a520'; // mid
-    let botColor  = '#a07010'; // bottom shadow
+    // Keep all platform-family pieces visually unified so traps are not obvious by color.
+    let topColor  = '#f5c842';
+    let midColor  = '#d4a520';
+    let botColor  = '#a07010';
     let edgeColor = '#c87818';
 
-    if (p.type === 'crumble') {
-      const ratio = p.state === 'crumbling' ? p.crumbleTimer / 30 : 0;
-      topColor  = `rgb(${Math.floor(220+ratio*35)},${Math.floor(160-ratio*80)},${Math.floor(50-ratio*40)})`;
-      midColor  = '#c06010';
-      edgeColor = '#ff6622';
-    } else if (p.type === 'falling') {
-      topColor = '#e8b030'; midColor = '#b07820'; botColor = '#805010'; edgeColor = '#d09030';
-    } else if (p.type === 'ice') {
-      topColor = '#c8eeff'; midColor = '#88ccff'; botColor = '#44aaff'; edgeColor = '#66bbff';
-    } else if (p.type === 'moving_platform') {
-      topColor = '#f0d060'; midColor = '#c0a030'; botColor = '#907010'; edgeColor = '#e0b840';
-    } else if (p.type === 'fake_floor') {
-      topColor = p.state === 'crumbling' ? '#e09030' : '#f5c842';
-      edgeColor = p.state === 'crumbling' ? '#ff6622' : '#c87818';
-    } else if (p.type === 'shrinking_wall') {
-      topColor = '#cc3030'; midColor = '#991010'; edgeColor = '#ff4422';
+    // Only show an obvious visual change once a platform is already breaking/active.
+    if (
+      (p.type === 'crumble' || p.type === 'fake_floor' || p.type === 'disappearing_ground') &&
+      p.state === 'crumbling'
+    ) {
+      const ratio = Math.min(1, (p.crumbleTimer || 0) / 30);
+      topColor  = `rgb(${Math.floor(245 - ratio * 22)},${Math.floor(200 - ratio * 58)},${Math.floor(66 - ratio * 28)})`;
+      midColor  = '#b97a22';
+      botColor  = '#845112';
+      edgeColor = '#d07c24';
     }
 
     const x = p.x, y = p.y, w = p.w, h = p.h;
@@ -6755,7 +6890,7 @@ function drawPlatforms() {
     }
 
     // Crumble cracks
-    if (p.type === 'crumble' && p.state === 'crumbling') {
+    if ((p.type === 'crumble' || p.type === 'fake_floor' || p.type === 'disappearing_ground') && p.state === 'crumbling') {
       ctx.strokeStyle = '#ff6622';
       ctx.lineWidth = 1.5;
       for (let i = 0; i < 3; i++) {
@@ -6766,11 +6901,6 @@ function drawPlatforms() {
       }
     }
 
-    // Ice shimmer
-    if (p.type === 'ice') {
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.fillRect(x+4, y+2, w*0.3, 3);
-    }
   });
 }
 
@@ -7471,19 +7601,43 @@ function drawTraps() {
       }
 
       case 'shrinking_gap_platform': {
-        ctx.fillStyle = '#2a2a3a';
-        ctx.strokeStyle = '#aa44aa';
+        const origX = t._origX ?? t.x;
+        const gapX = Math.min(origX, t.x);
+        const gapW = Math.abs(t.x - origX);
+
+        if (gapW > 1) {
+          // Carve out the opened floor gap so it blends into the platform
+          ctx.clearRect(gapX, t.y, gapW, t.h);
+          ctx.fillStyle = 'rgba(90, 60, 20, 0.10)';
+          ctx.fillRect(gapX, t.y, gapW, 3);
+          ctx.fillStyle = '#6f5a29';
+          for (let xi = gapX + 6; xi < gapX + gapW - 4; xi += 14) {
+            const bite = 2 + Math.floor(((xi - gapX) / 14) % 3);
+            ctx.fillRect(xi, t.y, 8, bite);
+          }
+        }
+
+        // Moving slab styled to match the normal floor platform
+        ctx.fillStyle = '#8a651c';
+        ctx.fillRect(t.x, t.y + 4, t.w, t.h - 4);
+        ctx.fillStyle = '#b99133';
+        ctx.fillRect(t.x, t.y + 2, t.w, t.h - 6);
+        ctx.fillStyle = '#f0cf63';
+        ctx.fillRect(t.x, t.y, t.w, Math.min(8, t.h * 0.35));
         ctx.lineWidth = 2;
-        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+        ctx.beginPath(); ctx.moveTo(t.x, t.y + t.h); ctx.lineTo(t.x, t.y); ctx.lineTo(t.x + t.w, t.y); ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+        ctx.beginPath(); ctx.moveTo(t.x + t.w, t.y); ctx.lineTo(t.x + t.w, t.y + t.h); ctx.lineTo(t.x, t.y + t.h); ctx.stroke();
+        ctx.strokeStyle = '#d3a13d';
+        ctx.lineWidth = 1;
         ctx.strokeRect(t.x, t.y, t.w, t.h);
-        ctx.fillStyle = 'rgba(255,255,255,0.06)';
-        ctx.fillRect(t.x + 2, t.y + 2, t.w - 4, 3);
-        if (player.alive && !player.onGround && player.vx > 0) {
-          ctx.fillStyle = 'rgba(170,68,170,0.4)';
-          ctx.font = '9px monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText('→', t.x + t.w/2, t.y - 4);
-          ctx.textAlign = 'left';
+
+        if (t.w > 64) {
+          ctx.fillStyle = 'rgba(0,0,0,0.08)';
+          for (let xi = t.x + 16; xi < t.x + t.w - 8; xi += 32) {
+            ctx.fillRect(xi, t.y + 2, 4, 3);
+          }
         }
         break;
       }

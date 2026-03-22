@@ -489,7 +489,7 @@ server.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════╗
 ║   LEVEL DEVIL — Server v3                ║
-║   Port:   ${PORT.toString().padEnd(30)}║
+║   Port:   ${PORT.toString().padEnd(30)} ║
 ║   DB:     ${dbConnected ? 'MongoDB Atlas ✓' : 'Not connected (set MONGODB_URI)'}${' '.repeat(Math.max(0,19-(dbConnected?15:30)))}║
 ║   Auth:   JWT (30d tokens)               ║
 ╚══════════════════════════════════════════╝
