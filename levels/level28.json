@@ -1,0 +1,78 @@
+{
+  "id": 28,
+  "name": "THE DOUBLE-CROSS",
+  "bgColor": "#5f5f5f",
+  "width": 1600,
+  "height": 480,
+  "spawnX": 60,
+  "spawnY": 376,
+  "platforms": [
+    { "x": 0,    "y": 416, "w": 1600, "h": 64, "type": "solid" },
+    { "x": 0,    "y": 0,   "w": 1600, "h": 32, "type": "solid" },
+    { "x": 0,    "y": 0,   "w": 32,   "h": 480, "type": "solid" },
+    { "x": 1568, "y": 0,   "w": 32,   "h": 480, "type": "solid" },
+    {
+      "x": 996,
+      "y": 416,
+      "w": 40,
+      "h": 64,
+      "type": "moving_platform",
+      "dx": 3,
+      "minX": 996,
+      "maxX": 1140,
+      "dir": 1,
+      "active": false,
+      "state": "idle"
+    }
+  ],
+  "traps": [
+    {
+      "type": "floor_hole",
+      "x": 900,
+      "y": 416,
+      "w": 96,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    },
+    {
+      "type": "floor_hole",
+      "x": 1036,
+      "y": 416,
+      "w": 156,
+      "h": 64,
+      "state": "closed",
+      "delay": 0
+    },
+    { "type": "spike_up", "x": 1068, "y": 384, "w": 32, "h": 32 },
+    { "type": "spike_up", "x": 1100, "y": 384, "w": 32, "h": 32 },
+    { "type": "spike_up", "x": 1132, "y": 384, "w": 32, "h": 32 }
+  ],
+  "events": [
+    {
+      "trigger": "player_x",
+      "value": 980,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 0
+    },
+    {
+      "trigger": "player_x",
+      "value": 980,
+      "triggered": false,
+      "action": "open_hole",
+      "trapIndex": 1
+    },
+    {
+      "trigger": "player_x",
+      "value": 980,
+      "triggered": false,
+      "action": "activate_platform_motion",
+      "platformIndex": 4,
+      "delayMs": 500
+    }
+  ],
+  "door": { "x": 1480, "y": 352, "locked": false },
+  "key": null,
+  "gravity": 1
+}

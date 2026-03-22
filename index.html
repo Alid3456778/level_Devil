@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-  <link rel="shortcut icon" href="./favicon.ico" type="image/x-icon" />
+  <link rel="shortcut icon" href="./assets/images/ghost.png" type="image/x-icon" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1676,6 +1676,12 @@ function connectSocket(cb) {
         break;
       }
 
+      case 'client_event_trigger': {
+        if (!isHost || !p) break;
+        hostAcceptClientEventTrigger(p.slot, data);
+        break;
+      }
+
       case 'key_collected': {
         // Another player picked up the key — unlock door for everyone
         if (key) {
@@ -2433,7 +2439,14 @@ function buildAllPlayerStates() {
     animFrame: player.animFrame,
     name: playerName,
   }];
-  remotePlayers.forEach((rp, slot) => states.push({ slot, ...rp }));
+  remotePlayers.forEach((rp, slot) => states.push({
+    slot,
+    ...rp,
+    x:  rp.logicX  ?? rp.x,
+    y:  rp.logicY  ?? rp.y,
+    vx: rp.logicVx ?? rp.vx,
+    vy: rp.logicVy ?? rp.vy,
+  }));
   return states;
 }
 
@@ -2602,6 +2615,8 @@ function sendInputToHost() {
 
 function applyRemoteInput(slot, msg) {
   const existing = remotePlayers.get(slot) || {};
+  const prevLogicX = existing.logicX ?? existing.x ?? msg.x;
+  const prevLogicY = existing.logicY ?? existing.y ?? msg.y;
   // If we have a recent position, blend rather than snap (prevents teleport)
   // Only hard-set if position diverged significantly (> 64px off)
   const dx = Math.abs((existing.x || 0) - msg.x);
@@ -2611,6 +2626,12 @@ function applyRemoteInput(slot, msg) {
     ...existing,
     x:  hardSnap ? msg.x : existing.x + (msg.x - existing.x) * 0.4,
     y:  hardSnap ? msg.y : existing.y + (msg.y - existing.y) * 0.4,
+    prevLogicX,
+    prevLogicY,
+    logicX: msg.x,
+    logicY: msg.y,
+    logicVx: msg.vx,
+    logicVy: msg.vy,
     vx: msg.vx, vy: msg.vy,
     facing: msg.facing,
     gravityFlipped: msg.gravityFlipped,
@@ -2618,6 +2639,25 @@ function applyRemoteInput(slot, msg) {
     animFrame: msg.animFrame,
     name: remotePlayers.get(slot)?.name || '?',
   });
+
+  if (isHost && multiMode) {
+    let firedAny = false;
+    events.forEach((ev, idx) => {
+      if (ev.triggered) return;
+      if (ev.trigger !== 'player_x' && ev.trigger !== 'player_y') return;
+      if (!_didCrossEventThreshold(ev, prevLogicX, prevLogicY, msg.x, msg.y)) return;
+
+      ev.triggered = true;
+      executeAction(ev);
+      firedAny = true;
+      console.log(`[Host] remote input triggered event ${idx} from slot=${slot} (${ev.trigger}=${ev.value})`);
+    });
+
+    if (firedAny) {
+      _fullSyncRequested = true;
+      _lastBroadcast = null;
+    }
+  }
 }
 
 function hostAdvanceLevel() {
@@ -2740,7 +2780,14 @@ function hideConnecting() {
 
 function getAllPlayerStates() {
   const all = [{ slot: myPlayerIdx, x: player.x, y: player.y, alive: player.alive, name: playerName }];
-  remotePlayers.forEach((rp, slot) => all.push({ slot, ...rp }));
+  remotePlayers.forEach((rp, slot) => all.push({
+    slot,
+    ...rp,
+    x: rp.logicX ?? rp.x,
+    y: rp.logicY ?? rp.y,
+    vx: rp.logicVx ?? rp.vx,
+    vy: rp.logicVy ?? rp.vy,
+  }));
   all.sort((a,b) => a.slot - b.slot);
   return all;
 }
@@ -3083,6 +3130,7 @@ let door        = { x: 0, y: 0, w: TILE, h: TILE*2, open: false };
 let key         = null; // { x, y, w, h, collected }
 let particles   = [];
 let shakeTimer  = 0;
+let _reportedEventTriggers = new Set();
 
 // ─── DEATH MESSAGES ────────────────────────────
 const DEATH_MSGS = [
@@ -3110,7 +3158,7 @@ const DEATH_MSGS = [
 // ════════════════════════════════════════════════
 
 // Total number of levels (must match files in /levels/)
-const LEVEL_COUNT = 26; // level 26 = "THE FLOOR FOLLOWS" (chase hole troll)
+const LEVEL_COUNT = 28; // level 28 = "THE DOUBLE-CROSS" (fake fake-out + sliding island)
 
 // Runtime level cache — populated by loadLevelData()
 const LEVELS = new Array(LEVEL_COUNT).fill(null);
@@ -3341,7 +3389,7 @@ function updateMultiRopes() {
   if (!isRopeLevelActive()) return;
 
   // Build list of all live players (local + remote)
-  const allPlayers = getAllPlayerStates();
+  const allPlayers = getRopePlayerStates();
   if (allPlayers.length < 2) return;
 
   // Rope connects consecutive players if within ROPE_MAX_LEN
@@ -3382,7 +3430,7 @@ function drawMultiRopes() {
   if (!multiMode) return;
   if (!isRopeLevelActive()) return;
 
-  const allPlayers = getAllPlayerStates();
+  const allPlayers = getRopePlayerStates();
   if (allPlayers.length < 2) return;
 
   for (let i = 0; i < allPlayers.length - 1; i++) {
@@ -3443,6 +3491,38 @@ function drawMultiRopes() {
   }
 }
 
+function getRopePlayerStates() {
+  const all = [{
+    slot: myPlayerIdx,
+    x: player.x,
+    y: player.y,
+    alive: player.alive,
+    name: playerName,
+  }];
+
+  remotePlayers.forEach((rp, slot) => {
+    let x = rp.logicX ?? rp.x;
+    let y = rp.logicY ?? rp.y;
+
+    if (!isHost) {
+      const interp = getInterpolatedRemote(slot);
+      if (interp) {
+        x = interp.x ?? x;
+        y = interp.y ?? y;
+      }
+    }
+
+    all.push({
+      ...rp,
+      slot,
+      x,
+      y,
+    });
+  });
+
+  all.sort((a, b) => a.slot - b.slot);
+  return all;
+}
 
 function applyRopeUpdate(msg) {
   // Future: sync rope anchor positions
@@ -4178,6 +4258,9 @@ async function loadLevel(idx) {
   door      = { ...lvl.door, w: TILE, h: TILE*2, open: false };
   key       = lvl.key ? { ...lvl.key, collected: false } : null;
   particles = [];
+  _reportedEventTriggers.clear();
+  rope.active = false;
+  rope.segments = [];
 
   // Reset player
   player.x    = lvl.spawnX;
@@ -4194,8 +4277,36 @@ async function loadLevel(idx) {
   player.onIce = false;
   player.onConveyor = 0;
 
+  // Reset remote player logic state for the new level/respawn so the host
+  // never evaluates triggers against stale dead positions from the last run.
+  remotePlayers.forEach((rp, slot) => {
+    const spawnX = lvl.spawnX + slot * 34;
+    const spawnY = lvl.spawnY;
+    remotePlayers.set(slot, {
+      ...rp,
+      x: spawnX,
+      y: spawnY,
+      logicX: spawnX,
+      logicY: spawnY,
+      prevLogicX: spawnX,
+      prevLogicY: spawnY,
+      vx: 0,
+      vy: 0,
+      logicVx: 0,
+      logicVy: 0,
+      alive: true,
+    });
+  });
+
   // Init piston hitboxes
   traps.forEach(t => {
+    if (t.type === 'floor_hole') {
+      t._origY = t._origY ?? t.y;
+      t._origH = t._origH ?? t.h;
+      t._openProgress = t.state === 'open' ? 1 : 0;
+      t._slabDrop = 0;
+      t._openingStarted = false;
+    }
     if (t.type === 'piston') {
       t.hitX = t.baseX !== undefined ? t.baseX : t.x;
       t.hitY = t.baseY !== undefined ? t.baseY : t.y;
@@ -4289,6 +4400,8 @@ function update() {
   if (!lvl) return;
   const now  = Date.now();
   const elapsed = now - levelStartTime;
+  const prevPlayerX = player.x;
+  const prevPlayerY = player.y;
 
   // ── Camera (follow local player or centroid in MP) ──
   updateCamera(lvl);
@@ -4314,6 +4427,7 @@ function update() {
     checkTrapCollisions();
     checkDoor(lvl);
     checkKey();
+    reportLocalEventTriggers(prevPlayerX, prevPlayerY);
   }
 
   // ── Player stacking (players as platforms for each other) ──
@@ -4333,7 +4447,7 @@ function update() {
 
   // ── Particles ──
   updateParticles();
-  updateRope();
+  if (!multiMode) updateRope();
 
   // ── Screen shake ──
   if (shakeTimer > 0) shakeTimer--;
@@ -4378,6 +4492,7 @@ function updatePlatforms(elapsed) {
     }
     if (p.type === 'moving_platform') {
       p._prevX = p.x;
+      if (p.active === false || p.state === 'idle') return;
       if (p.dir === undefined) p.dir = 1;
       p.x += (p.dx || 2) * p.dir;
       if (p.x >= p.maxX) { p.x = p.maxX; p.dir = -1; }
@@ -4441,6 +4556,25 @@ function updateTraps() {
   // getNearestPlayer() returns whichever player (local or remote) is closest to a point.
   traps.forEach(t => {
     switch (t.type) {
+      case 'floor_hole': {
+        if (t.state === 'open' && !t._openingStarted) {
+          t._openingStarted = true;
+          t._openProgress = t._openProgress ?? 0;
+          t._slabDrop = 0;
+        }
+
+        if (t.state === 'open' && (t._openProgress ?? 0) < 1) {
+          t._openProgress = Math.min(1, (t._openProgress ?? 0) + 0.12);
+          const ease = 1 - Math.pow(1 - t._openProgress, 3);
+          t._slabDrop = ease * ((t.dropDistance || (t._origH || t.h) + 18));
+        } else if (t.state !== 'open') {
+          t._openProgress = Math.max(0, (t._openProgress ?? 0) - 0.15);
+          t._slabDrop = (t._openProgress || 0) * ((t.dropDistance || (t._origH || t.h) + 18));
+          if (t._openProgress === 0) t._openingStarted = false;
+        }
+        break;
+      }
+
       case 'spike_moving_h':
         t.x += t.dx * t.dir;
         if (t.x >= t.maxX || t.x <= t.minX) t.dir *= -1;
@@ -5332,7 +5466,11 @@ function processEvents(elapsed) {
   // This fixes traps that require crossing a position trigger (player_x, player_y)
   // — previously only the host's local player position was checked, so non-host
   // players walking over trigger zones would not activate holes/spikes/events.
-  const allPlayers = getAllPlayerStates();
+  const allPlayers = getAllPlayerStates().map(p => ({
+    ...p,
+    prevX: p.prevLogicX ?? p.x,
+    prevY: p.prevLogicY ?? p.y,
+  }));
 
   events.forEach(ev => {
     if (ev.triggered) return;
@@ -5343,13 +5481,13 @@ function processEvents(elapsed) {
     }
 
     if (ev.trigger === 'player_x') {
-      // Fire if ANY player has crossed this X threshold
-      fired = allPlayers.some(p => p.alive !== false && p.x >= ev.value);
+      // Fire if ANY player's body crosses this X threshold between snapshots.
+      fired = allPlayers.some(p => p.alive !== false && _didCrossEventThreshold(ev, p.prevX, p.prevY, p.x, p.y));
     }
 
     if (ev.trigger === 'player_y') {
-      // Fire if ANY player has reached this Y threshold (above = lower y value)
-      fired = allPlayers.some(p => p.alive !== false && p.y <= ev.value);
+      // Fire if ANY player has crossed this Y threshold between snapshots.
+      fired = allPlayers.some(p => p.alive !== false && _didCrossEventThreshold(ev, p.prevX, p.prevY, p.x, p.y));
     }
 
     if (fired) {
@@ -5359,11 +5497,123 @@ function processEvents(elapsed) {
   });
 }
 
+function _didCrossEventThreshold(ev, prevX, prevY, curX, curY) {
+  if (ev.trigger === 'player_x') {
+    const prevFront = Math.max(prevX, prevX + PLAYER_W);
+    const curFront  = Math.max(curX, curX + PLAYER_W);
+    return Math.max(prevFront, curFront) >= ev.value;
+  }
+
+  if (ev.trigger === 'player_y') {
+    const prevTop = Math.min(prevY, prevY + PLAYER_H);
+    const curTop  = Math.min(curY, curY + PLAYER_H);
+    return Math.min(prevTop, curTop) <= ev.value;
+  }
+
+  return false;
+}
+
+function reportLocalEventTriggers(prevX, prevY) {
+  if (!multiMode || isHost || !socket || !player.alive) return;
+
+  const curX = player.x;
+  const curY = player.y;
+
+  events.forEach((ev, idx) => {
+    if (ev.triggered) return;
+    if (ev.trigger !== 'player_x' && ev.trigger !== 'player_y') return;
+
+    const key = `${currentLevelIndex}:${idx}`;
+    if (_reportedEventTriggers.has(key)) return;
+    if (!_didCrossEventThreshold(ev, prevX, prevY, curX, curY)) return;
+
+    _reportedEventTriggers.add(key);
+    console.log(`[Client] reporting event ${idx} (${ev.trigger}=${ev.value}) prev=(${prevX.toFixed(1)},${prevY.toFixed(1)}) cur=(${curX.toFixed(1)},${curY.toFixed(1)})`);
+    socket.emit('game:event', {
+      type: 'client_event_trigger',
+      eventIndex: idx,
+      trigger: ev.trigger,
+      value: ev.value,
+      levelIndex: currentLevelIndex,
+      prevX: Math.round(prevX * 10) / 10,
+      prevY: Math.round(prevY * 10) / 10,
+      x: Math.round(curX * 10) / 10,
+      y: Math.round(curY * 10) / 10,
+    });
+  });
+}
+
+function hostAcceptClientEventTrigger(slot, data) {
+  if (!isHost) return false;
+  if (typeof data?.eventIndex !== 'number') {
+    console.warn('[Host] client_event_trigger rejected: invalid eventIndex', data);
+    return false;
+  }
+  if (data.levelIndex !== currentLevelIndex) {
+    console.warn(`[Host] client_event_trigger rejected: level mismatch eventLevel=${data.levelIndex} currentLevel=${currentLevelIndex}`);
+    return false;
+  }
+
+  const ev = events[data.eventIndex];
+  if (!ev) {
+    console.warn(`[Host] client_event_trigger rejected: missing event ${data.eventIndex}`);
+    return false;
+  }
+  if (ev.triggered) {
+    console.log(`[Host] client_event_trigger ignored: event ${data.eventIndex} already triggered`);
+    return false;
+  }
+  if (ev.trigger !== data.trigger) {
+    console.warn(`[Host] client_event_trigger rejected: trigger mismatch ${data.trigger} !== ${ev.trigger}`);
+    return false;
+  }
+  if (ev.value !== data.value) {
+    console.warn(`[Host] client_event_trigger rejected: value mismatch ${data.value} !== ${ev.value}`);
+    return false;
+  }
+
+  const rp = remotePlayers.get(slot);
+  if (!rp) {
+    console.warn(`[Host] client_event_trigger rejected: missing remote player for slot ${slot}`);
+    return false;
+  }
+  if (rp.alive === false) {
+    console.warn(`[Host] client_event_trigger rejected: slot ${slot} is dead`);
+    return false;
+  }
+
+  const prevX = Number.isFinite(data.prevX) ? data.prevX : (rp.prevLogicX ?? rp.logicX ?? rp.x);
+  const prevY = Number.isFinite(data.prevY) ? data.prevY : (rp.prevLogicY ?? rp.logicY ?? rp.y);
+  const curX  = Number.isFinite(data.x) ? data.x : (rp.logicX ?? rp.x);
+  const curY  = Number.isFinite(data.y) ? data.y : (rp.logicY ?? rp.y);
+
+  if (!_didCrossEventThreshold(ev, prevX, prevY, curX, curY)) {
+    console.warn(`[Host] client_event_trigger rejected: threshold not crossed for slot=${slot} event=${data.eventIndex}`, { prevX, prevY, curX, curY, trigger: ev.trigger, value: ev.value });
+    return false;
+  }
+
+  ev.triggered = true;
+  executeAction(ev);
+  _fullSyncRequested = true;
+  _lastBroadcast = null;
+  console.log(`[Host] client_event_trigger accepted slot=${slot} event=${data.eventIndex} trigger=${ev.trigger}`);
+  return true;
+}
+
 function executeAction(ev) {
+  if (ev.delayMs && !ev._delayConsumed) {
+    const delayedEv = { ...ev, _delayConsumed: true };
+    setTimeout(() => executeAction(delayedEv), ev.delayMs);
+    return;
+  }
+
   switch (ev.action) {
     case 'open_hole':
       if (traps[ev.trapIndex]) {
         traps[ev.trapIndex].state = 'open';
+        traps[ev.trapIndex]._openingStarted = false;
+        traps[ev.trapIndex]._openProgress = 0;
+        traps[ev.trapIndex]._slabDrop = 0;
         spawnParticles(traps[ev.trapIndex].x, traps[ev.trapIndex].y, '#ff4400', 12);
         shakeTimer = 8;
         console.log(`[Event] open_hole trap[${ev.trapIndex}] — triggered by all-player check`);
@@ -5401,6 +5651,13 @@ function executeAction(ev) {
 
     case 'flip_controls':
       player.controlsFlipped = !player.controlsFlipped;
+      break;
+
+    case 'activate_platform_motion':
+      if (platforms[ev.platformIndex] && platforms[ev.platformIndex].type === 'moving_platform') {
+        platforms[ev.platformIndex].active = true;
+        platforms[ev.platformIndex].state = 'moving';
+      }
       break;
   }
 }
@@ -5497,7 +5754,12 @@ function checkPlayerCollisions(lvl) {
     // Moving platforms carry the player
     if (p.type === 'moving_platform' && p._prevX !== undefined) {
       const carriedX = p.x - p._prevX;
-      if (Math.abs(player.y + PLAYER_H - p.y) < 6) player.x += carriedX;
+      const feetOnTop = Math.abs(player.y + PLAYER_H - p.y) < 6;
+      const overlapsPlatform = player.x + PLAYER_W > p.x && player.x < p.x + p.w;
+      const fallingOrSettled = player.vy >= -0.5;
+      if (feetOnTop && overlapsPlatform && fallingOrSettled) {
+        player.x += carriedX;
+      }
     }
     if (p.type === 'moving_platform') p._prevX = p.x;
 
@@ -5573,6 +5835,7 @@ function checkTrapCollisions() {
 
         // ── Holes (floor_hole, expanding_hole, smart_hole) ──
         if ((t.type==='floor_hole'||t.type==='expanding_hole') && t.state==='open' &&
+            (t.type !== 'floor_hole' || (t._openProgress ?? 1) >= 0.65) &&
             rx+PLAYER_W > t.x && rx < t.x+t.w && ry+PLAYER_H > t.y && ry < t.y+t.h)
           { hit=true; msg='FELL IN THE HOLE.'; }
         if (t.type==='smart_hole' && !t.fake && t.state==='open' &&
@@ -5666,6 +5929,7 @@ function checkTrapCollisions() {
     switch (t.type) {
       case 'floor_hole':
         if (t.state !== 'open') return;
+        if ((t._openProgress ?? 1) < 0.65) return;
         if (player.x + PLAYER_W > t.x && player.x < t.x + t.w &&
             player.y + PLAYER_H > t.y && player.y < t.y + t.h) {
           killPlayer("THE FLOOR WAS A LIE.");
@@ -6391,7 +6655,7 @@ function render() {
   // Draw world
   drawPlatforms();
   drawTraps();
-  drawRope();
+  if (!multiMode) drawRope();
   if (multiMode) {
     drawRemotePlayers();
     drawMultiRopes();
@@ -6490,15 +6754,6 @@ function drawPlatforms() {
       }
     }
 
-    // Moving platform arrows
-    if (p.type === 'moving_platform') {
-      ctx.fillStyle = 'rgba(255,200,0,0.7)';
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('◀ ▶', x + w/2, y + h/2 + 4);
-      ctx.textAlign = 'left';
-    }
-
     // Crumble cracks
     if (p.type === 'crumble' && p.state === 'crumbling') {
       ctx.strokeStyle = '#ff6622';
@@ -6538,15 +6793,55 @@ function drawTraps() {
         break;
 
       case 'floor_hole':
-        if (t.state === 'open') {
-          ctx.fillStyle = '#000';
-          ctx.fillRect(t.x, t.y, t.w, t.h);
-          ctx.shadowColor = '#ff4400';
-          ctx.shadowBlur  = 12;
-          ctx.strokeStyle = '#ff4400';
-          ctx.lineWidth   = 2;
-          ctx.strokeRect(t.x, t.y, t.w, t.h);
-          ctx.shadowBlur  = 0;
+        if (t.state === 'open' || (t._openProgress || 0) > 0) {
+          const progress = t._openProgress ?? 0;
+          const slabDrop = t._slabDrop ?? 0;
+          const rimH = Math.max(5, Math.round((t.h || 64) * 0.18));
+          const innerPad = 4 + (1 - progress) * 6;
+          const pitX = t.x + innerPad;
+          const pitY = t.y + rimH * 0.35;
+          const pitW = Math.max(0, t.w - innerPad * 2);
+          const pitH = Math.max(0, t.h - rimH * 0.55);
+
+          if (pitW > 0 && pitH > 0) {
+            ctx.clearRect(pitX, pitY, pitW, pitH);
+            ctx.fillStyle = 'rgba(90, 60, 20, 0.12)';
+            ctx.fillRect(pitX, pitY, pitW, 3);
+          }
+
+          // Broken floor rim
+          ctx.fillStyle = '#7b652f';
+          ctx.fillRect(t.x, t.y, t.w, rimH);
+          ctx.fillStyle = '#5d4a22';
+          ctx.fillRect(t.x, t.y + rimH - 2, t.w, 4);
+          ctx.fillStyle = '#a88a43';
+          for (let xi = t.x + 8; xi < t.x + t.w - 4; xi += 14) {
+            const bite = 2 + Math.floor(((xi - t.x) / 14) % 3);
+            ctx.fillRect(xi, t.y + rimH - 1, 8, bite);
+          }
+
+          // Falling slab animation
+          if (progress < 1 || slabDrop > 0) {
+            const slabInset = 2 + progress * 6;
+            const slabX = t.x + slabInset;
+            const slabY = t.y + slabDrop;
+            const slabW = Math.max(0, t.w - slabInset * 2);
+            const slabH = Math.max(8, (t._origH || t.h) - 6);
+            const slabAlpha = Math.max(0, 1 - progress * 0.9);
+
+            ctx.save();
+            ctx.globalAlpha = slabAlpha;
+            ctx.fillStyle = '#b99133';
+            ctx.fillRect(slabX, slabY, slabW, slabH);
+            ctx.fillStyle = '#f0cf63';
+            ctx.fillRect(slabX, slabY, slabW, Math.min(8, slabH * 0.3));
+            ctx.fillStyle = '#8a651c';
+            ctx.fillRect(slabX, slabY + slabH - 6, slabW, 6);
+            ctx.strokeStyle = 'rgba(70,40,10,0.45)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(slabX, slabY, slabW, slabH);
+            ctx.restore();
+          }
         }
         break;
 
