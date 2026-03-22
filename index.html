@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+  <link rel="shortcut icon" href="./favicon.ico" type="image/x-icon" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -77,9 +78,9 @@
     0%,100% { transform: rotate(0deg); }
     50%      { transform: rotate(90deg); }
   }
-  /* Show rotate message only on portrait mobile */
+  /* Show rotate message only on portrait mobile AND only during game (not menus) */
   @media (max-width: 768px) and (orientation: portrait) {
-    #rotateMsg { display: flex; }
+    #rotateMsg.game-active { display: flex; }
   }
 
   /* ─── SCREENS ─── */
@@ -109,8 +110,107 @@
   /* ─── NAME SCREEN ─── */
   #nameScreen {
     background: radial-gradient(ellipse at center, #1a0a0a 0%, #0a0a0f 70%);
-    padding: clamp(12px,3vw,32px);
-    gap: 8px;
+    /* Don't use padding-top here — nsFullscreenBtn is absolute positioned */
+    padding: clamp(12px,3vw,28px);
+    gap: 6px;
+    position: relative;
+    /* KEY FIX: don't try to center vertically — start from top so nothing is clipped */
+    justify-content: flex-start !important;
+    align-items: center !important;
+    padding-top: clamp(60px,12vw,80px); /* clear the absolute fullscreen button */
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
+  }
+
+  /* ── Fullscreen button on name screen (top-right, mobile-friendly) ── */
+  #nsFullscreenBtn {
+    position: absolute;
+    top: clamp(10px,3vw,18px);
+    right: clamp(10px,3vw,18px);
+    background: rgba(255,255,255,0.07);
+    border: 2px solid rgba(240,168,48,0.5);
+    color: rgba(240,168,48,0.9);
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(11px,2.5vw,16px);
+    width:  clamp(36px,8vw,48px);
+    height: clamp(36px,8vw,48px);
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  #nsFullscreenBtn:active {
+    background: rgba(240,168,48,0.2);
+    border-color: #f0a830;
+  }
+
+  /* ── Retro tooltip — blink-border pixel-art style ── */
+  #nsTooltip {
+    position: absolute;
+    top: clamp(56px,12vw,76px);
+    right: clamp(6px,2vw,14px);
+    width: clamp(150px,38vw,220px);
+    background: #0a0a0f;
+    border: 2px solid #f0a830;
+    color: #f0a830;
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(5px,1.2vw,7px);
+    line-height: 1.8;
+    padding: clamp(6px,1.5vw,10px) clamp(8px,2vw,12px);
+    z-index: 11;
+    /* Retro scanline shimmer */
+    box-shadow: 0 0 0 1px #0a0a0f, 0 0 0 3px #f0a830, 0 0 16px rgba(240,168,48,0.3);
+    animation: tooltipBlink 0.9s step-end infinite;
+    pointer-events: none; /* don't block input clicks */
+  }
+  #nsTooltip::before {
+    content: '';
+    position: absolute;
+    top: -10px; right: 14px;
+    border: 5px solid transparent;
+    border-bottom-color: #f0a830;
+  }
+  #nsTooltip::after {
+    content: '';
+    position: absolute;
+    top: -7px; right: 15px;
+    border: 4px solid transparent;
+    border-bottom-color: #0a0a0f;
+  }
+  #nsTooltip .tip-arrow {
+    display: inline-block;
+    animation: arrowBounce 0.6s ease-in-out infinite alternate;
+    margin-right: 4px;
+    font-size: clamp(8px,2vw,10px);
+  }
+  @keyframes tooltipBlink {
+    0%, 100% { box-shadow: 0 0 0 1px #0a0a0f, 0 0 0 3px #f0a830, 0 0 16px rgba(240,168,48,0.3); }
+    50%       { box-shadow: 0 0 0 1px #0a0a0f, 0 0 0 3px #c87820, 0 0 6px rgba(240,168,48,0.1); }
+  }
+  @keyframes arrowBounce {
+    from { transform: translateY(0); }
+    to   { transform: translateY(-3px); }
+  }
+
+  /* ── Mobile: nameScreen on very small screens ── */
+  @media (max-height: 500px) {
+    /* Very short screens (landscape phone): hide decorative extras only */
+    .skull-deco { display: none; }
+    #nameScreen .title { font-size: clamp(14px,5vw,22px); margin-bottom: 2px; }
+    #nameScreen .subtitle { display: none; }
+    #logoTagline { display: none; }
+    .auth-tabs { margin-bottom: 5px; }
+  }
+  @media (max-width: 380px) {
+    /* Narrow phones: full width inputs */
+    .auth-form { width: 92vw; }
+    .auth-tabs { width: 92vw; }
+    .auth-form input { font-size: 14px; } /* 14px+ prevents iOS auto-zoom */
   }
   #nameScreen .title {
     font-size: clamp(18px, 5vw, 48px);
@@ -123,10 +223,125 @@
   #nameScreen .subtitle {
     font-size: clamp(7px, 1.5vw, 11px);
     color: var(--orange);
-    margin-bottom: clamp(16px,4vw,40px);
+    margin-bottom: clamp(6px, 1.5vw, 12px);
     letter-spacing: 3px;
     text-align: center;
   }
+  /* ── Auth tab switcher ── */
+  .auth-tabs {
+    display: flex; gap: 0;
+    border: 2px solid #555;
+    border-radius: 4px;
+    margin-bottom: 10px; overflow: hidden;
+    width: min(360px, 90vw);
+    flex-shrink: 0; /* never collapse */
+  }
+  .auth-tab {
+    flex: 1;
+    padding: clamp(10px,2.5vw,14px) 8px;
+    background: #1a1a2a;
+    border: none;
+    /* Visible even when inactive */
+    color: #aaa;
+    font-family: inherit;
+    font-size: clamp(8px,2.2vw,10px);
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    min-height: 44px; /* iOS touch target */
+  }
+  .auth-tab.active {
+    background: #cc1111;
+    color: #fff;
+    font-weight: bold;
+  }
+  .auth-tab:not(.active) {
+    border-right: 1px solid #444;
+  }
+  .auth-tab:not(.active):hover,
+  .auth-tab:not(.active):active {
+    background: #2a1a2a;
+    color: #fff;
+  }
+
+  /* ── Auth forms ── */
+  .auth-form {
+    display: flex; flex-direction: column;
+    gap: clamp(6px,1.5vw,9px);
+    width: min(360px, 90vw); /* same width as tabs */
+  }
+  .auth-form input {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid #333; border-radius: 3px;
+    color: #f0f0f0; font-family: inherit;
+    font-size: clamp(9px,2.5vw,11px); /* readable on mobile */
+    padding: clamp(10px,2.5vw,12px) clamp(10px,2.5vw,14px);
+    outline: none; width: 100%; box-sizing: border-box;
+    transition: border-color 0.15s;
+    /* Prevent iOS zoom-on-focus (needs 16px font OR this meta tag exists) */
+    -webkit-text-size-adjust: 100%;
+  }
+  .auth-form input:focus { border-color: var(--orange); }
+  .auth-form input::placeholder { color: #444; }
+  .auth-msg {
+    font-size: clamp(6px,1.8vw,8px); text-align: center;
+    min-height: 14px; letter-spacing: 1px; line-height: 1.6;
+  }
+  .auth-msg.err  { color: var(--red); }
+  .auth-msg.ok   { color: #00ff88; }
+  .auth-msg.info { color: #666; }
+  /* ── Logo tagline (Minecraft-style) ── */
+  #logoTagline {
+    font-size: clamp(6px,1.4vw,8px); color: #ffcc44;
+    text-align: center; margin-top: -8px; margin-bottom: 8px;
+    height: 14px; text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
+    animation: taglineFade 0.4s ease-in;
+  }
+  @keyframes taglineFade { from { opacity:0; transform:translateY(-3px); } to { opacity:1; } }
+  /* ── Leaderboard overlay ── */
+  #leaderboardOverlay {
+    display: none; position: fixed; inset: 0; z-index: 300;
+    background: rgba(0,0,0,0.92);
+    align-items: center; justify-content: center; flex-direction: column;
+    padding: clamp(12px,3vw,24px);
+  }
+  #leaderboardOverlay.open { display: flex; }
+  .lb-container {
+    width: min(600px, 95vw); max-height: 82vh;
+    background: #0d0d18; border: 2px solid #c87820;
+    border-radius: 4px; overflow: hidden; display: flex; flex-direction: column;
+  }
+  .lb-header {
+    background: linear-gradient(90deg,#8B6914,#c87820,#8B6914);
+    padding: clamp(8px,2vw,14px) clamp(12px,3vw,20px);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .lb-title { font-size: clamp(10px,2.5vw,16px); color: #fff8e8; }
+  .lb-close { background:none; border:1px solid rgba(255,255,255,0.3); color:#fff; font-family:inherit; font-size:clamp(8px,2vw,10px); padding:4px 10px; cursor:pointer; border-radius:2px; }
+  .lb-tabs { display:flex; border-bottom:1px solid #333; background:#0a0a14; padding:0 12px; gap:4px; overflow-x:auto; flex-shrink:0; }
+  .lb-tab { background:none; border:none; border-bottom:2px solid transparent; color:#555; font-family:inherit; font-size:clamp(6px,1.4vw,7px); padding:8px 10px; cursor:pointer; white-space:nowrap; transition:color 0.15s,border-color 0.15s; }
+  .lb-tab.active { color:#f0a830; border-bottom-color:#f0a830; }
+  .lb-tab:hover:not(.active) { color:#888; }
+  .lb-body { overflow-y:auto; flex:1; padding:8px 0; }
+  .lb-loading { text-align:center; color:#555; font-size:8px; padding:24px; }
+  .lb-row {
+    display:grid; grid-template-columns:32px 1fr 80px 60px 60px;
+    align-items:center; padding:clamp(5px,1.2vw,8px) clamp(10px,2.5vw,16px);
+    border-bottom:1px solid rgba(255,255,255,0.04); font-size:clamp(6px,1.4vw,8px);
+    transition:background 0.1s;
+  }
+  .lb-row:hover { background:rgba(255,255,255,0.03); }
+  .lb-row.rank-1 { color:#FFD700; background:rgba(255,215,0,0.06); }
+  .lb-row.rank-2 { color:#C0C0C0; background:rgba(192,192,192,0.04); }
+  .lb-row.rank-3 { color:#CD7F32; background:rgba(205,127,50,0.04); }
+  .lb-rank { font-size:clamp(8px,2vw,11px); text-align:center; }
+  .lb-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lb-score  { text-align:right; color:#f0a830; font-weight:bold; }
+  .lb-deaths { text-align:right; color:#ff6666; }
+  .lb-time   { text-align:right; color:#88ccff; }
+  .lb-col-hdr { color:#555; font-size:clamp(5px,1.2vw,6px); letter-spacing:1px; }
+  .lb-empty  { text-align:center; color:#444; padding:24px; font-size:7px; }
+
   .skull-deco {
     font-size: clamp(22px,5vw,36px);
     margin-bottom: clamp(12px,3vw,24px);
@@ -323,7 +538,7 @@
     padding-left:   var(--safe-left);
     padding-right:  var(--safe-right);
   }
-   .mobile-btn {
+  .mobile-btn {
     position: absolute;
     /* Pixel-art dark button like Level Devil reference */
     background: #73737313;
@@ -725,23 +940,55 @@
 
 <!-- ══════════════ NAME SCREEN ══════════════ -->
 <div id="nameScreen" class="screen active">
+
+  <!-- Fullscreen button top-right with safe-area gap -->
+  <button id="nsFullscreenBtn" onclick="nsToggleFullscreen()" title="Fullscreen">⛶</button>
+
+  <!-- Retro blinking tooltip pointing at fullscreen btn -->
+  <div id="nsTooltip">
+    <span class="tip-arrow">▲</span>TAP FOR<br>FULL SCREEN<br>
+    <span style="color:#ff8800;">BETTER EXP!</span>
+  </div>
+
   <div class="skull-deco">💀</div>
   <div class="title">LEVEL DEVIL</div>
+  <!-- Minecraft-style rotating tagline -->
+  <div id="logoTagline">&nbsp;</div>
   <div class="subtitle">— NOT A TROLL GAME —</div>
-  <div style="font-size:clamp(6px,1.5vw,8px);color:#ff6b00;margin-bottom:16px;letter-spacing:2px;text-align:center;">
-    ⚡ PHASE 3 — MULTIPLAYER · VOICE · ROOMS ⚡
+
+  <!-- Auth tab switcher: LOGIN / REGISTER -->
+  <div class="auth-tabs">
+    <button class="auth-tab active" id="tabLogin"    onclick="authShowTab('login')">LOGIN</button>
+    <button class="auth-tab"        id="tabRegister" onclick="authShowTab('register')">NEW PLAYER</button>
   </div>
-  <div class="name-form">
-    <input type="text" id="playerNameInput" placeholder="ENTER YOUR NAME"
-           maxlength="12" autocomplete="off" spellcheck="false"
-           onkeydown="if(event.key==='Enter')goToModeSelect()">
-    <button class="btn" onclick="goToModeSelect()">CONTINUE ▶</button>
-    <div style="font-size:clamp(6px,1.5vw,7px);color:#555;margin-top:10px;text-align:center;line-height:2;">
-      WASD / ARROWS · SPACE TO JUMP
-    </div>
+
+  <!-- LOGIN FORM -->
+  <div id="authLogin" class="auth-form">
+    <input type="text"     id="liUsername" placeholder="USERNAME OR EMAIL" maxlength="60" autocomplete="username">
+    <input type="password" id="liPassword" placeholder="PASSWORD"          maxlength="60" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter') authLogin()">
+    <div class="auth-msg info" id="liMsg">RETURNING PLAYER? WELCOME BACK.</div>
+    <button class="btn" onclick="authLogin()">LOGIN ▶</button>
+    <button class="btn btn-secondary" style="margin-top:4px;font-size:clamp(5px,1.2vw,7px);"
+            onclick="authSkipToGuest()">PLAY AS GUEST (NO SAVE)</button>
+  </div>
+
+  <!-- REGISTER FORM (hidden by default) -->
+  <div id="authRegister" class="auth-form" style="display:none;">
+    <input type="text"     id="regUsername" placeholder="CHOOSE USERNAME (2-20 CHARS)" maxlength="20" autocomplete="username">
+    <input type="email"    id="regEmail"    placeholder="EMAIL ADDRESS"               maxlength="80" autocomplete="email">
+    <input type="password" id="regPassword" placeholder="PASSWORD (MIN 6 CHARS)"      maxlength="60" autocomplete="new-password"
+           onkeydown="if(event.key==='Enter') authRegister()">
+    <div class="auth-msg info" id="regMsg">CREATE YOUR ACCOUNT TO SAVE SCORES.</div>
+    <button class="btn" onclick="authRegister()">CREATE ACCOUNT ▶</button>
+    <button class="btn btn-secondary" style="margin-top:4px;font-size:clamp(5px,1.2vw,7px);"
+            onclick="authSkipToGuest()">PLAY AS GUEST (NO SAVE)</button>
+  </div>
+
+  <div style="font-size:clamp(5px,1.2vw,6px);color:#333;margin-top:8px;text-align:center;">
+    WASD / ARROWS · SPACE TO JUMP
   </div>
 </div>
-
 <!-- ══════════════ LEVEL SELECT OVERLAY ══════════════ -->
 <div id="levelSelectOverlay" style="
   display:none; position:fixed; inset:0; z-index:200;
@@ -789,6 +1036,10 @@
     <button class="btn btn-secondary" onclick="openLevelSelect('solo')"
             style="font-size:clamp(7px,2vw,9px);padding:10px 16px;border-color:#f0a830;color:#f0a830;">
       🗺️ GET TO LEVEL
+    </button>
+    <button class="btn btn-secondary" onclick="openLeaderboard()"
+            style="font-size:clamp(7px,2vw,9px);padding:10px 16px;border-color:#ffd700;color:#ffd700;">
+      🏆 LEADERBOARD
     </button>
   </div>
   <button class="btn btn-secondary" onclick="showScreen('nameScreen')"
@@ -1128,10 +1379,55 @@ let stateTickAccum  = 0;
 const STATE_TICK_MS = 22; // ~45 Hz — more frequent = less client drift
 let lastInputSent   = 0;
 
-// ── PLAYER INTERPOLATION ────────────────────
-const INTERP_DELAY_MS  = 80;  // render remotes 80ms behind — balance smooth vs lag
-const _remoteSnapshots = new Map(); // slot → [{ts, x, y, vx, vy, ...}, ...]
-const _MAX_SNAPSHOTS   = 12;  // more snapshots = smoother over jitter
+// ════════════════════════════════════════════════════════════════
+//  ADAPTIVE LAG COMPENSATION SYSTEM
+//  Automatically tunes ALL sync parameters based on measured ping.
+//  At >200ms the game auto-adjusts so it stays smooth and playable.
+// ════════════════════════════════════════════════════════════════
+
+// These are mutable — _applyLagSettings() changes them based on ping tier
+let INTERP_DELAY_MS = 80;  // how far behind we render remote players
+let _MAX_SNAPSHOTS  = 12;  // snapshot buffer depth
+
+const _remoteSnapshots = new Map();
+
+// ── PING HISTORY — smooth out single spikes ─────────────────────
+const _pingHistory       = [];
+const _PING_HISTORY_SIZE = 8;
+let   _smoothPing        = 0;
+let   _lagTier           = 0; // 0=GREAT 1=GOOD 2=HIGH 3=BAD
+const _LAG_NAMES         = ['GREAT','GOOD','HIGH','BAD'];
+
+function _updateLagTier(rawPing) {
+  _pingHistory.push(rawPing);
+  if (_pingHistory.length > _PING_HISTORY_SIZE) _pingHistory.shift();
+  // Trim top 25% spikes — use stable average
+  const sorted   = [..._pingHistory].sort((a,b) => a-b);
+  const trimmed  = sorted.slice(0, Math.ceil(sorted.length * 0.75));
+  _smoothPing    = Math.round(trimmed.reduce((s,v) => s+v, 0) / trimmed.length);
+
+  const prev = _lagTier;
+  if      (_smoothPing < 80)  _lagTier = 0; // GREAT
+  else if (_smoothPing < 150) _lagTier = 1; // GOOD
+  else if (_smoothPing < 280) _lagTier = 2; // HIGH
+  else                        _lagTier = 3; // BAD
+
+  if (_lagTier !== prev) {
+    _applyLagSettings();
+    console.log(`[Lag] ${_LAG_NAMES[prev]} → ${_LAG_NAMES[_lagTier]} (${_smoothPing}ms avg)`);
+  }
+}
+
+function _applyLagSettings() {
+  // Each tier tunes the interpolation window so we always have
+  // enough snapshots to interpolate smoothly, regardless of latency.
+  switch (_lagTier) {
+    case 0: INTERP_DELAY_MS = 50;  _MAX_SNAPSHOTS = 8;  break; // <80ms  — near-instant
+    case 1: INTERP_DELAY_MS = 120; _MAX_SNAPSHOTS = 12; break; // <150ms — comfortable
+    case 2: INTERP_DELAY_MS = 220; _MAX_SNAPSHOTS = 18; break; // <280ms — full comp
+    case 3: INTERP_DELAY_MS = 350; _MAX_SNAPSHOTS = 24; break; // >280ms — heavy comp
+  }
+}
 
 // ── TRAP INTERPOLATION ───────────────────────
 // Clients run trap physics locally at 60fps for smooth animation.
@@ -1498,6 +1794,7 @@ function connectSocket(cb) {
   // ── Ping ──
   socket.on('ping:res', ({ ts }) => {
     myPing = Date.now() - ts;
+    _updateLagTier(myPing); // adaptive compensation update
     updatePingDisplay();
   });
 }
@@ -1506,8 +1803,12 @@ function connectSocket(cb) {
 //  PHASE 3 — NAVIGATION & MODE FLOW
 // ════════════════════════════════════════════════
 function goToModeSelect() {
-  const inp = document.getElementById('playerNameInput');
-  playerName = inp.value.trim().toUpperCase() || 'PLAYER';
+  // Read name from whichever auth input is visible, or use already-set playerName
+  if (!playerName || playerName === 'PLAYER') {
+    const inp = document.getElementById('liUsername') || document.getElementById('regUsername');
+    const val = (inp?.value || '').trim().toUpperCase();
+    playerName = val || _authUsername || 'PLAYER';
+  }
   showScreen('modeScreen');
 }
 
@@ -2088,36 +2389,35 @@ let _broadcastCount = 0;
 // Lerp speed is tuned so traps look smooth at 100ms network latency.
 function lerpTrapPositions() {
   if (!multiMode || isHost) return;
-  // Adaptive lerp speed:
-  // - Fast for slow traps (pillars, ceilings) — needs to catch up
-  // - Slower for fast traps (spike wheels, moving spikes) — prevent overshoot
+
+  // Lerp speed scales with ping tier:
+  // HIGH ping = faster lerp so traps catch up before next packet arrives.
+  // LOW ping  = slower lerp for smooth gentle correction.
+  const baseLerp  = [0.20, 0.28, 0.40, 0.55][_lagTier]; // per lag tier
+  const snapDist  = [80,   90,  120,  200 ][_lagTier]; // snap if further than this
+
   traps.forEach(t => {
-    // Position X
     if (t._targetX !== undefined) {
-      const distX = t._targetX - t.x;
-      const lerp = Math.abs(distX) > 20 ? 0.35 : 0.25; // faster when far
-      t.x += distX * lerp;
-      if (Math.abs(distX) < 0.05) t.x = t._targetX;
+      const d = t._targetX - t.x;
+      if (Math.abs(d) > snapDist) { t.x = t._targetX; }
+      else { t.x += d * (Math.abs(d) > 20 ? baseLerp * 1.4 : baseLerp); }
+      if (Math.abs(t._targetX - t.x) < 0.05) t.x = t._targetX;
     }
-    // Position Y
     if (t._targetY !== undefined) {
-      const distY = t._targetY - t.y;
-      const lerp = Math.abs(distY) > 20 ? 0.35 : 0.25;
-      t.y += distY * lerp;
-      if (Math.abs(distY) < 0.05) t.y = t._targetY;
+      const d = t._targetY - t.y;
+      if (Math.abs(d) > snapDist) { t.y = t._targetY; }
+      else { t.y += d * (Math.abs(d) > 20 ? baseLerp * 1.4 : baseLerp); }
+      if (Math.abs(t._targetY - t.y) < 0.05) t.y = t._targetY;
     }
-    // Angle (spike wheel, saw blade, magnetic spike)
     if (t._targetAngle !== undefined) {
-      const da = t._targetAngle - (t.angle || 0);
-      t.angle = (t.angle || 0) + da * 0.25;
+      t.angle = (t.angle||0) + (t._targetAngle - (t.angle||0)) * baseLerp;
     }
-    // Pillar height (_curH)
     if (t._targetCurH !== undefined) {
-      const dh = t._targetCurH - (t._curH || 0);
-      t._curH = (t._curH || 0) + dh * 0.3;
+      const d = t._targetCurH - (t._curH||0);
+      t._curH = (t._curH||0) + d * (baseLerp * 1.2);
       t.h = t._curH;
       if (t._origY !== undefined) t.y = t._origY + (t._origH||0) - t._curH;
-      if (Math.abs(dh) < 0.05) t._curH = t._targetCurH;
+      if (Math.abs(d) < 0.05) t._curH = t._targetCurH;
     }
   });
 }
@@ -2240,12 +2540,17 @@ function getInterpolatedRemote(slot) {
   // If renderTime is beyond all snapshots, extrapolate from latest
   if (renderTime > buf[buf.length - 1].ts) {
     const latest = buf[buf.length - 1];
-    // velocity is in px/frame at 60fps, dt is in frames
-    const dtFrames = Math.min((Date.now() - latest.ts) / (1000 / 60), 3); // cap at 3 frames
+    const dtFrames = (Date.now() - latest.ts) / (1000 / 60);
+    // At high ping, allow more extrapolation frames before capping.
+    // This keeps remote players moving smoothly between distant packets.
+    const maxExtrapFrames = [3, 5, 8, 12][_lagTier];
+    const cap = Math.min(dtFrames, maxExtrapFrames);
+    // Dampen velocity at high ping to prevent wild overshooting
+    const velDamp = [1.0, 0.9, 0.75, 0.6][_lagTier];
     return {
       ...latest,
-      x: latest.x + (latest.vx || 0) * dtFrames,
-      y: latest.y + (latest.vy || 0) * dtFrames,
+      x: latest.x + (latest.vx || 0) * cap * velDamp,
+      y: latest.y + (latest.vy || 0) * cap * velDamp,
     };
   }
 
@@ -2366,17 +2671,46 @@ function broadcastAll(msg) {
 function updatePingDisplay() {
   const el = document.getElementById('pingDisplay');
   if (!el) return;
-  const color = myPing < 60 ? '#00ff88' : myPing < 120 ? '#ffcc00' : myPing < 200 ? '#ff8800' : '#ff2222';
-  const cMode = _getConnectionMode();
-  const mIcon = cMode === 'p2p' ? '⚡' : cMode === 'hybrid' ? '◑' : '●';
-  const mTip  = cMode === 'p2p'
-    ? `Direct P2P — ${myPing}ms`
-    : cMode === 'hybrid'
-    ? `Mixed P2P+relay — ${myPing}ms`
-    : `Server relay — ${myPing}ms (P2P not yet connected)`;
-  const quality = myPing < 60 ? 'GREAT' : myPing < 120 ? 'GOOD' : myPing < 200 ? 'OK' : 'POOR';
-  el.innerHTML = `<span style="color:${color}" title="${mTip}">${mIcon}</span> ${myPing}ms`;
-  el.title = mTip;
+
+  const color  = ['#00ff88','#ffcc00','#ff8800','#ff3333'][_lagTier] || '#ff2222';
+  const label  = _LAG_NAMES[_lagTier] || '?';
+  const cMode  = _getConnectionMode();
+  const mIcon  = cMode === 'p2p' ? '⚡' : cMode === 'hybrid' ? '◑' : '●';
+  const tipPfx = cMode === 'p2p' ? 'Direct P2P' : cMode === 'hybrid' ? 'Mixed' : 'Relay';
+  const tip    = `${tipPfx} — ${Math.round(_smoothPing)}ms avg (${label})`;
+
+  el.innerHTML = `<span style="color:${color}" title="${tip}">${mIcon}</span> ${myPing}ms`;
+  el.title = tip;
+  _updateLagBanner();
+}
+
+function _updateLagBanner() {
+  let banner = document.getElementById('_lagBanner');
+  if (_lagTier < 2) {
+    if (banner) banner.style.display = 'none';
+    return;
+  }
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = '_lagBanner';
+    banner.style.cssText = [
+      'position:absolute','top:0','left:0','right:0','z-index:50',
+      'text-align:center','font-family:inherit','font-size:clamp(6px,1.5vw,8px)',
+      'padding:2px 8px','pointer-events:none','letter-spacing:1px'
+    ].join(';');
+    const gs = document.getElementById('gameScreen');
+    if (gs) gs.appendChild(banner);
+  }
+  if (_lagTier === 2) {
+    banner.style.background = 'rgba(255,140,0,0.85)';
+    banner.style.color = '#000';
+    banner.textContent = `⚠ HIGH LATENCY ${Math.round(_smoothPing)}ms — COMPENSATING`;
+  } else {
+    banner.style.background = 'rgba(180,0,0,0.9)';
+    banner.style.color = '#fff';
+    banner.textContent = `⛔ POOR CONNECTION ${Math.round(_smoothPing)}ms — GAME MAY FEEL DELAYED`;
+  }
+  banner.style.display = 'block';
 }
 
 function setStatus(id, msg, cls) {
@@ -2776,7 +3110,7 @@ const DEATH_MSGS = [
 // ════════════════════════════════════════════════
 
 // Total number of levels (must match files in /levels/)
-const LEVEL_COUNT = 25;
+const LEVEL_COUNT = 26; // level 26 = "THE FLOOR FOLLOWS" (chase hole troll)
 
 // Runtime level cache — populated by loadLevelData()
 const LEVELS = new Array(LEVEL_COUNT).fill(null);
@@ -3119,15 +3453,16 @@ function applyRopeUpdate(msg) {
 // ════════════════════════════════════════════════
 function drawRemotePlayers() {
   remotePlayers.forEach((rp, slot) => {
-    // Use interpolated position instead of raw server position
-    // This eliminates visual teleporting from packet jitter
     const interp = getInterpolatedRemote(slot);
     if (interp && interp !== rp) {
       rp = { ...rp, x: interp.x, y: interp.y };
     }
     if (!rp.alive) return;
+    // BAD ping: ghost mode — semi-transparent to show position is approximate
+    if (_lagTier === 3) ctx.globalAlpha = 0.60;
     const colorIdx = slot % PLAYER_COLORS.length;
     drawRemotePlayer(rp, colorIdx, slot);
+    if (_lagTier === 3) ctx.globalAlpha = 1;
   });
 }
 
@@ -3449,7 +3784,11 @@ function init() {
   }
   // Initial resize after fonts/layout settle
   setTimeout(resize, 100);
-  setTimeout(resize, 500); // second pass catches late mobile reflows
+  setTimeout(resize, 500);
+  // Start rotating logo taglines
+  startLogoTaglines();
+  // Try to restore previous session automatically
+  authAutoLogin();
   buildLevelOrder();
 }
 
@@ -3493,6 +3832,284 @@ function toggleGameMute() {
   const btn = document.getElementById('btnMute');
   if (btn) btn.textContent = muted ? '🔇' : '🔊';
 }
+
+// ── Name screen fullscreen + tooltip ─────────────────────────
+// ════════════════════════════════════════════════════════════════
+//  AUTH SYSTEM — JWT + MongoDB via REST API
+// ════════════════════════════════════════════════════════════════
+const AUTH_TOKEN_KEY = 'ld_auth_token';
+let _authToken    = null;
+let _authUsername = null;
+let _authUserId   = null;
+
+function _authSaveToken(token, username, userId) {
+  _authToken    = token;
+  _authUsername = username;
+  _authUserId   = userId;
+  try { localStorage.setItem(AUTH_TOKEN_KEY, JSON.stringify({ token, username, userId })); } catch {}
+}
+
+function _authClearToken() {
+  _authToken = _authUsername = _authUserId = null;
+  try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch {}
+}
+
+function _authHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (_authToken) h['Authorization'] = 'Bearer ' + _authToken;
+  return h;
+}
+
+// Called on page load — restore session from localStorage
+async function authAutoLogin() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(AUTH_TOKEN_KEY) || 'null');
+    if (!stored?.token) return;
+    // Verify token is still valid with server
+    const res = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + stored.token } });
+    const data = await res.json();
+    if (data.ok) {
+      _authSaveToken(stored.token, data.username, data.userId);
+      // Pre-fill the login username field with the stored name
+      const inp = document.getElementById('liUsername');
+      if (inp) inp.value = data.username;
+      playerName = data.username;
+      console.log('[Auth] Auto-login:', data.username);
+      // Show welcome back message then auto-continue
+      const liMsg = document.getElementById('liMsg');
+      if (liMsg) { liMsg.className = 'auth-msg ok'; liMsg.textContent = 'WELCOME BACK, ' + data.username.toUpperCase() + '!'; }
+      setTimeout(() => { _dismissNsTooltip(); goToModeSelect(); }, 1200);
+    }
+  } catch (e) { console.log('[Auth] Auto-login failed:', e.message); }
+}
+
+async function authLogin() {
+  const username = (document.getElementById('liUsername')?.value || '').trim();
+  const password = (document.getElementById('liPassword')?.value || '').trim();
+  const msg = document.getElementById('liMsg');
+  if (!username || !password) { _authMsg(msg, 'ENTER USERNAME AND PASSWORD', 'err'); return; }
+  _authMsg(msg, 'LOGGING IN...', 'info');
+  try {
+    const res  = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    const data = await res.json();
+    if (data.ok) {
+      _authSaveToken(data.token, data.username, data.userId);
+      playerName = data.username;
+      _authMsg(msg, 'WELCOME BACK, ' + data.username.toUpperCase() + '!', 'ok');
+      setTimeout(() => { _dismissNsTooltip(); goToModeSelect(); }, 800);
+    } else {
+      _authMsg(msg, data.reason || 'LOGIN FAILED', 'err');
+    }
+  } catch { _authMsg(msg, 'SERVER UNREACHABLE', 'err'); }
+}
+
+async function authRegister() {
+  const username = (document.getElementById('regUsername')?.value || '').trim();
+  const email    = (document.getElementById('regEmail')?.value    || '').trim();
+  const password = (document.getElementById('regPassword')?.value || '').trim();
+  const msg = document.getElementById('regMsg');
+  if (!username || !email || !password) { _authMsg(msg, 'ALL FIELDS REQUIRED', 'err'); return; }
+  _authMsg(msg, 'CREATING ACCOUNT...', 'info');
+  try {
+    const res  = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, email, password }) });
+    const data = await res.json();
+    if (data.ok) {
+      _authSaveToken(data.token, data.username, data.userId);
+      playerName = data.username;
+      _authMsg(msg, 'ACCOUNT CREATED! WELCOME, ' + data.username.toUpperCase() + '!', 'ok');
+      setTimeout(() => { _dismissNsTooltip(); goToModeSelect(); }, 900);
+    } else {
+      _authMsg(msg, data.reason || 'REGISTRATION FAILED', 'err');
+    }
+  } catch { _authMsg(msg, 'SERVER UNREACHABLE', 'err'); }
+}
+
+function authSkipToGuest() {
+  const u = (document.getElementById('liUsername')?.value || '').trim() || 'GUEST';
+  playerName = u;
+  _dismissNsTooltip();
+  goToModeSelect();
+}
+
+function authShowTab(tab) {
+  document.getElementById('authLogin').style.display    = tab === 'login'    ? 'flex' : 'none';
+  document.getElementById('authRegister').style.display = tab === 'register' ? 'flex' : 'none';
+  document.getElementById('tabLogin').classList.toggle('active',    tab === 'login');
+  document.getElementById('tabRegister').classList.toggle('active', tab === 'register');
+}
+
+function _authMsg(el, text, cls) {
+  if (!el) return;
+  el.textContent = text;
+  el.className   = 'auth-msg ' + cls;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SCORE SUBMISSION — called at level clear
+// ════════════════════════════════════════════════════════════════
+async function submitLevelScore(levelId, deaths, timeSec) {
+  if (!_authToken) return; // guests don't submit
+  try {
+    const res = await fetch('/api/scores', {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ levelId, deaths, timeSec }),
+    });
+    const data = await res.json();
+    if (data.ok && data.saved) {
+      console.log(`[Score] Saved level ${levelId}: ${data.score} pts (improved by ${data.improved})`);
+      // Invalidate leaderboard cache so next open shows fresh data
+      _lbCurrentData = null;
+    }
+  } catch (e) { console.warn('[Score] Submit failed:', e.message); }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  LOGO TAGLINES — Minecraft-style rotating witty lines
+// ════════════════════════════════════════════════════════════════
+const LOGO_TAGLINES = [
+  'NOT A TROLL GAME!!!',
+  'THE FLOOR IS YOUR ENEMY.',
+  'TRUST NOTHING.',
+  '100% SKILL BASED!',
+  'THE HOLE FOLLOWS YOU.',
+  'SPIKE? WHAT SPIKE?',
+  'DEFINITELY NOT A TRAP.',
+  'SKILL ISSUE.',
+  'RAGE-QUIT CERTIFIED.',
+  'TOUCHING GRASS IS FORBIDDEN.',
+  'THE DOOR LOVES YOU. THE FLOOR DOESN\'T.',
+  'MORE DEATHS = MORE FUN!',
+  'PLEASE DO NOT THROW YOUR PHONE.',
+  'ACTUALLY A GREAT GAME!',
+  'PRE-INSTALLED FRUSTRATION.',
+  'THE CEILING MEANS WELL.',
+  'JUMP. FALL. REPEAT.',
+  'TROLL SIMULATOR 3000.',
+  'YOUR FAULT, NOT OURS.',
+  'BUT WAIT, THERE\'S MORE!',
+  'FRIENDS DON\'T LET FRIENDS PLAY ALONE.',
+  'WE\'RE SORRY. NO WE\'RE NOT.',
+];
+
+let _taglineInterval = null;
+function startLogoTaglines() {
+  const el = document.getElementById('logoTagline');
+  if (!el) return;
+  let idx = Math.floor(Math.random() * LOGO_TAGLINES.length);
+  function rotate() {
+    el.style.animation = 'none';
+    el.offsetHeight; // reflow to restart animation
+    el.style.animation = '';
+    el.textContent = LOGO_TAGLINES[idx % LOGO_TAGLINES.length];
+    idx++;
+  }
+  rotate();
+  _taglineInterval = setInterval(rotate, 3500);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  LEADERBOARD
+// ════════════════════════════════════════════════════════════════
+let _lbCurrentData  = null;
+let _lbLoading      = false;
+
+function openLeaderboard() {
+  const ov = document.getElementById('leaderboardOverlay');
+  if (ov) ov.classList.add('open');
+  _lbFetch();
+}
+
+function closeLeaderboard() {
+  const ov = document.getElementById('leaderboardOverlay');
+  if (ov) ov.classList.remove('open');
+}
+
+async function _lbFetch() {
+  if (_lbLoading) return;
+  _lbLoading = true;
+  const body = document.getElementById('lbBody');
+  if (body) body.innerHTML = '<div class="lb-loading">LOADING SCORES...</div>';
+
+  try {
+    const res  = await fetch('/api/leaderboard?limit=10');
+    const data = await res.json();
+    if (data.ok) {
+      _renderLb(data.scores, body);
+    } else {
+      if (body) body.innerHTML = '<div class="lb-empty">DATABASE NOT CONNECTED.<br>SET MONGODB_URI ON SERVER.</div>';
+    }
+  } catch {
+    if (body) body.innerHTML = '<div class="lb-empty">COULD NOT REACH SERVER.</div>';
+  }
+  _lbLoading = false;
+}
+
+function _renderLb(scores, body) {
+  if (!body) return;
+  if (!scores || scores.length === 0) {
+    body.innerHTML = '<div class="lb-empty">NO SCORES YET.<br>BE THE FIRST TO FINISH A LEVEL!</div>';
+    return;
+  }
+  const medals = ['🥇', '🥈', '🥉'];
+  let html = '';
+  scores.forEach((s, i) => {
+    const rank  = i + 1;
+    const cls   = rank <= 3 ? `rank-${rank}` : '';
+    const badge = rank <= 3 ? medals[rank - 1] : rank;
+    // server returns: { username, score (total), deaths (total), levelsPlayed }
+    html += `<div class="lb-row ${cls}">
+      <div class="lb-rank">${badge}</div>
+      <div class="lb-name">${escHtml(s.username)}</div>
+      <div class="lb-score">${(s.score || 0).toLocaleString()}</div>
+      <div class="lb-deaths">${s.deaths || 0}💀</div>
+      <div class="lb-time">${s.levelsPlayed || 0} LVL</div>
+    </div>`;
+  });
+  body.innerHTML = html;
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function nsToggleFullscreen() {
+  const el = document.documentElement;
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
+    if (req) req.call(el).catch(() => {});
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(() => {});
+    }
+    const btn = document.getElementById('nsFullscreenBtn');
+    if (btn) btn.textContent = '✕';
+    _dismissNsTooltip();
+  } else {
+    const ex = document.exitFullscreen || document.webkitExitFullscreen;
+    if (ex) ex.call(document).catch(() => {});
+    const btn = document.getElementById('nsFullscreenBtn');
+    if (btn) btn.textContent = '⛶';
+  }
+}
+
+function _dismissNsTooltip() {
+  const tip = document.getElementById('nsTooltip');
+  if (tip) {
+    tip.style.transition = 'opacity 0.3s';
+    tip.style.opacity = '0';
+    setTimeout(() => { if (tip) tip.style.display = 'none'; }, 300);
+  }
+}
+
+// Dismiss tooltip when user interacts with any auth input
+document.addEventListener('DOMContentLoaded', () => {
+  ['liUsername','liPassword','regUsername','regEmail','regPassword'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.addEventListener('focus', _dismissNsTooltip); }
+  });
+  // Auto-dismiss after 6 seconds
+  setTimeout(_dismissNsTooltip, 6000);
+});
 
 function toggleFullscreen() {
   const el = document.documentElement;
@@ -3645,11 +4262,14 @@ function loop(timestamp) {
       _accumulator -= _FIXED_STEP;
       steps++;
     }
-    // Host broadcasts at ~30Hz using real elapsed time
+    // Host broadcasts at adaptive rate based on measured ping tier.
+    // GREAT(<80ms)=60Hz  GOOD(<150ms)=45Hz  HIGH(<280ms)=30Hz  BAD(>280ms)=20Hz
     if (multiMode && isHost) {
       stateTickAccum += delta;
-      if (stateTickAccum >= STATE_TICK_MS) {
+      const adaptiveTick = [16, 22, 33, 50][_lagTier] || STATE_TICK_MS;
+      if (stateTickAccum >= adaptiveTick) {
         stateTickAccum = 0;
+        _broadcastCount++;
         broadcastGameState();
       }
     }
@@ -4708,13 +5328,29 @@ function updateTraps() {
 
 // ─── EVENT PROCESSING ────────────────────────
 function processEvents(elapsed) {
+  // Build a list of all active players (local + remote) for position checks
+  // This fixes traps that require crossing a position trigger (player_x, player_y)
+  // — previously only the host's local player position was checked, so non-host
+  // players walking over trigger zones would not activate holes/spikes/events.
+  const allPlayers = getAllPlayerStates();
+
   events.forEach(ev => {
     if (ev.triggered) return;
     let fired = false;
 
-    if (ev.trigger === 'player_x' && player.x >= ev.value) fired = true;
-    if (ev.trigger === 'time'     && elapsed >= ev.value)   fired = true;
-    if (ev.trigger === 'player_y' && player.y <= ev.value)  fired = true;
+    if (ev.trigger === 'time' && elapsed >= ev.value) {
+      fired = true; // time triggers are always global
+    }
+
+    if (ev.trigger === 'player_x') {
+      // Fire if ANY player has crossed this X threshold
+      fired = allPlayers.some(p => p.alive !== false && p.x >= ev.value);
+    }
+
+    if (ev.trigger === 'player_y') {
+      // Fire if ANY player has reached this Y threshold (above = lower y value)
+      fired = allPlayers.some(p => p.alive !== false && p.y <= ev.value);
+    }
 
     if (fired) {
       ev.triggered = true;
@@ -4730,24 +5366,18 @@ function executeAction(ev) {
         traps[ev.trapIndex].state = 'open';
         spawnParticles(traps[ev.trapIndex].x, traps[ev.trapIndex].y, '#ff4400', 12);
         shakeTimer = 8;
+        console.log(`[Event] open_hole trap[${ev.trapIndex}] — triggered by all-player check`);
       }
       break;
 
     case 'drop_ceiling_spike':
       if (traps[ev.trapIndex]) {
         traps[ev.trapIndex].state = 'dropping';
+        console.log(`[Event] drop_ceiling_spike trap[${ev.trapIndex}]`);
       }
       break;
 
     case 'start_falling_ceiling':
-      platforms.forEach(p => {
-        if (p.type === 'falling' && p.state === 'waiting') {
-          // Kick off the delay countdown from now
-          p._startTime = Date.now();
-          p.state = 'waiting'; // stays waiting but delay now counts from trigger
-        }
-      });
-      // Actually force-start all falling platforms ignoring delay
       platforms.forEach(p => {
         if (p.type === 'falling' && p.state === 'waiting') {
           p.state = 'falling';
@@ -4758,6 +5388,7 @@ function executeAction(ev) {
       break;
 
     case 'flip_gravity':
+      // Flip local player gravity
       player.gravityFlipped = true;
       shakeTimer = 12;
       spawnParticles(player.x, player.y, '#8888ff', 20);
@@ -5594,13 +6225,18 @@ function levelClear() {
   gameState = 'clear';
   spawnParticles(door.x + 16, door.y + 32, '#ffd700', 40);
   _doorReached.clear();
-  // Stop bg music — will restart fresh when NEXT LEVEL is pressed
   AUDIO.stopBg();
   AUDIO.playSfx('sfx_door.mp3');
 
-  const elapsed = ((Date.now() - levelStartTime) / 1000).toFixed(1);
+  // Submit score to leaderboard
+  const realIdx  = levelOrder.length > 0 ? levelOrder[currentLevelIndex] : currentLevelIndex;
+  const timeSec  = Math.round((Date.now() - levelStartTime) / 1000);
+  submitLevelScore(realIdx + 1, levelDeaths, timeSec); // levelId is 1-based
+
+  const elapsed = (timeSec).toFixed(0) + 's';
+  const elapsedDisp = Math.floor(timeSec/60) + ':' + String(timeSec%60).padStart(2,'0');
   document.getElementById('levelStats').innerHTML =
-    `TIME: ${elapsed}s<br>DEATHS THIS LEVEL: ${levelDeaths}`;
+    `TIME: ${elapsedDisp}<br>DEATHS THIS LEVEL: ${levelDeaths}`;
 
   if (multiMode) {
     // Show who made it through
@@ -7366,11 +8002,13 @@ function setupInput() {
     }
   });
 
-  // Name input: Enter key to start
-  document.getElementById('playerNameInput').addEventListener('keydown', e => {
-    e.stopPropagation(); // prevent game input from consuming this
-    if (e.key === 'Enter') startGame();
-  });
+  // Auth inputs: Enter key handling (playerNameInput no longer exists — replaced by auth form)
+  const liPass = document.getElementById('liPassword');
+  if (liPass) liPass.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') authLogin(); });
+  const liUser = document.getElementById('liUsername');
+  if (liUser) liUser.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') authLogin(); });
+  const regPass = document.getElementById('regPassword');
+  if (regPass) regPass.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') authRegister(); });
 }
 
 // ─── MOBILE TOUCH CONTROLS ───────────────────
@@ -7405,6 +8043,9 @@ function setupMobileControls() {
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  // Rotate-to-landscape overlay: only show during gameplay, never on menus
+  const rm = document.getElementById('rotateMsg');
+  if (rm) rm.classList.toggle('game-active', id === 'gameScreen');
   // Background music per screen
   if (id === 'nameScreen' || id === 'modeScreen' || id === 'lobbyScreen' || id === 'roomScreen') {
     AUDIO.playBg('bg_menu.mp3');
@@ -7548,5 +8189,27 @@ function drawRope() {
 // ════════════════════════════════════════════════
 window.addEventListener('load', init);
 </script>
+
+<!-- ══════════════ LEADERBOARD OVERLAY ══════════════ -->
+<div id="leaderboardOverlay">
+  <div class="lb-container">
+    <div class="lb-header">
+      <span class="lb-title">🏆 LEADERBOARD</span>
+      <button class="lb-close" onclick="closeLeaderboard()">✕ CLOSE</button>
+    </div>
+    <!-- Column headers -->
+    <div class="lb-row lb-col-hdr" style="border-bottom:1px solid #333;border-top:none;">
+      <div>#</div>
+      <div>PLAYER</div>
+      <div class="lb-score">TOTAL PTS</div>
+      <div class="lb-deaths">DEATHS</div>
+      <div class="lb-time">LEVELS</div>
+    </div>
+    <div class="lb-body" id="lbBody">
+      <div class="lb-loading">LOADING...</div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
