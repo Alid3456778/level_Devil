@@ -805,6 +805,10 @@
     gap: 16px;
     padding: clamp(12px,3vw,24px);
   }
+  #modeScreen.active {
+    align-items: center;
+    justify-content: flex-start;
+  }
   .mode-account-bar {
     width: min(520px, 94vw);
     display: flex;
@@ -1656,6 +1660,121 @@
 </div>
 
 <script src="src/runtime.bundle.js?v=20260324-pvp-friends"></script>
+
+<script>
+// Auto-fullscreen on mobile rotation during gameplay
+function initAutoFullscreen() {
+  let isPlayingGame = false;
+  let lastOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+  let orientationListenersAttached = false;
+  
+  // Function to check if game is currently playing
+  function checkGameState() {
+    const gameScreen = document.getElementById('gameScreen');
+    if (gameScreen) {
+      const isVisible = gameScreen.style.display !== 'none' && gameScreen.style.display !== '';
+      isPlayingGame = isVisible || (typeof gameState !== 'undefined' && gameState === 'playing');
+    }
+    return isPlayingGame;
+  }
+  
+  // Function to attach orientation listeners (call this multiple times if needed)
+  function attachOrientationListeners() {
+    if (orientationListenersAttached) return;
+    
+    function handleOrientationChange() {
+      const currentOrientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+      checkGameState(); // Update game state on every orientation check
+      
+      // Only auto-fullscreen if game is playing
+      if (isPlayingGame) {
+        if (currentOrientation === 'landscape' && lastOrientation === 'portrait') {
+          // Rotated to landscape - enable fullscreen
+          setTimeout(() => {
+            const el = document.documentElement;
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+              const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
+              if (req) req.call(el).catch(() => {});
+              if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('landscape').catch(() => {});
+              }
+              const btn = document.getElementById('nsFullscreenBtn');
+              if (btn) btn.textContent = '✕';
+            }
+          }, 100);
+        } else if (currentOrientation === 'portrait' && lastOrientation === 'landscape') {
+          // Rotated back to portrait - exit fullscreen
+          setTimeout(() => {
+            if (document.fullscreenElement || document.webkitFullscreenElement) {
+              const ex = document.exitFullscreen || document.webkitExitFullscreen;
+              if (ex) ex.call(document).catch(() => {});
+              const btn = document.getElementById('nsFullscreenBtn');
+              if (btn) btn.textContent = '⛶';
+            }
+          }, 100);
+        }
+      }
+      
+      lastOrientation = currentOrientation;
+    }
+    
+    // Listen for orientation change events
+    window.addEventListener('orientationchange', handleOrientationChange);
+    window.addEventListener('resize', handleOrientationChange);
+    
+    // Handle fullscreen exit
+    document.addEventListener('fullscreenchange', () => {
+      const btn = document.getElementById('nsFullscreenBtn');
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        if (btn) btn.textContent = '⛶';
+      }
+    });
+    
+    orientationListenersAttached = true;
+  }
+  
+  // Track if game state changes via custom event
+  window.addEventListener('gameStateChanged', (e) => {
+    checkGameState();
+    // Ensure listeners are attached when game starts
+    if (isPlayingGame && !orientationListenersAttached) {
+      attachOrientationListeners();
+    }
+  });
+  
+  // Watch gameScreen for display changes
+  const gameScreenWatcher = new MutationObserver(() => {
+    checkGameState();
+    // Ensure listeners are attached when game screen becomes visible
+    if (isPlayingGame && !orientationListenersAttached) {
+      attachOrientationListeners();
+    }
+  });
+  
+  const gameScreen = document.getElementById('gameScreen');
+  if (gameScreen) {
+    gameScreenWatcher.observe(gameScreen, { attributes: true, attributeFilter: ['style'], subtree: false });
+  }
+  
+  // Polling fallback - check game state every 500ms and attach listeners if game starts
+  const pollInterval = setInterval(() => {
+    checkGameState();
+    if (isPlayingGame && !orientationListenersAttached) {
+      attachOrientationListeners();
+    }
+  }, 500);
+  
+  // Attach listeners immediately on init (in case game is already running)
+  attachOrientationListeners();
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initAutoFullscreen);
+} else {
+  initAutoFullscreen();
+}
+</script>
 
 <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â• LEADERBOARD OVERLAY â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
 <div id="leaderboardOverlay">

@@ -1063,7 +1063,7 @@ function updateRoomScreenModeUI() {
   if (title) title.textContent = isPvp ? 'PVP BATTLE' : 'MULTIPLAYER';
   if (badge) badge.textContent = isPvp ? 'PVP ROOM · PICK A SIDE' : 'CO-OP ROOM';
   if (createBtn) createBtn.textContent = isPvp ? 'CREATE PVP ROOM' : 'CREATE ROOM';
-  if (joinBtn) joinBtn.textContent = isPvp ? 'JOIN PVP' : 'JOIN';
+  if (joinBtn) joinBtn.textContent = isPvp ? 'JOIN' : 'JOIN';
   if (createStatus) createStatus.textContent = isPvp ? 'Create a code for a PvP team room' : 'Ready to create a room';
   if (joinStatus) joinStatus.textContent = isPvp ? 'Enter a PvP room code to join' : 'Enter a room code to join';
 }
