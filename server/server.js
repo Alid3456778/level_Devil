@@ -84,13 +84,27 @@ const ScoreSchema = new mongoose.Schema({
 ScoreSchema.index({ levelId: 1, score: -1 });  // leaderboard query
 ScoreSchema.index({ userId: 1, levelId: 1 }, { unique: true }); // one record per user/level
 
-let User, Score;
+const FeedbackSchema = new mongoose.Schema({
+  userId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  username:    { type: String, trim: true, maxlength: 20, default: null },
+  email:       { type: String, trim: true, lowercase: true, default: null },
+  guestName:   { type: String, trim: true, maxlength: 40, default: null },
+  message:     { type: String, required: true, trim: true, maxlength: 1500 },
+  source:      { type: String, enum: ['auth', 'guest'], required: true },
+  createdAt:   { type: Date, default: Date.now },
+  userAgent:   { type: String, default: '' },
+  ip:          { type: String, default: '' },
+});
+FeedbackSchema.index({ createdAt: -1 });
+
+let User, Score, Feedback;
 if (MONGO_URI) {
   mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 5000 })
     .then(() => {
       dbConnected = true;
-      User  = mongoose.model('User',  UserSchema);
-      Score = mongoose.model('Score', ScoreSchema);
+      User     = mongoose.model('User', UserSchema);
+      Score    = mongoose.model('Score', ScoreSchema);
+      Feedback = mongoose.model('Feedback', FeedbackSchema);
       console.log('[MongoDB] Connected to Atlas ✓');
     })
     .catch(err => {
@@ -184,7 +198,7 @@ app.post('/api/auth/register', async (req, res) => {
     const token = signToken(user._id, user.username);
 
     console.log(`[Auth] Registered: ${username}`);
-    res.json({ ok: true, token, username: user.username, userId: user._id });
+    res.json({ ok: true, token, username: user.username, userId: user._id, email: user.email });
   } catch (err) {
     console.error('[Auth] Register error:', err);
     res.status(500).json({ ok: false, reason: 'Registration failed' });
@@ -216,7 +230,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     const token = signToken(user._id, user.username);
     console.log(`[Auth] Login: ${user.username}`);
-    res.json({ ok: true, token, username: user.username, userId: user._id });
+    res.json({ ok: true, token, username: user.username, userId: user._id, email: user.email });
   } catch (err) {
     console.error('[Auth] Login error:', err);
     res.status(500).json({ ok: false, reason: 'Login failed' });
@@ -226,7 +240,91 @@ app.post('/api/auth/login', async (req, res) => {
 // GET /api/auth/me — verify stored token and return user info
 app.get('/api/auth/me', optionalAuth, (req, res) => {
   if (!req.user) return res.json({ ok: false });
-  res.json({ ok: true, username: req.user.username, userId: req.user.sub });
+  if (!dbConnected || !User) {
+    return res.json({ ok: true, username: req.user.username, userId: req.user.sub, email: null });
+  }
+  User.findById(req.user.sub).select('username email').lean()
+    .then(user => {
+      if (!user) return res.json({ ok: false });
+      res.json({ ok: true, username: user.username, userId: req.user.sub, email: user.email });
+    })
+    .catch(() => {
+      res.json({ ok: true, username: req.user.username, userId: req.user.sub, email: null });
+    });
+});
+
+// POST /api/auth/logout
+app.post('/api/auth/logout', optionalAuth, (req, res) => {
+  res.clearCookie('ld_token', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+  if (req.user?.username) {
+    console.log(`[Auth] Logout: ${req.user.username}`);
+  }
+  res.json({ ok: true });
+});
+
+// POST /api/feedback
+app.post('/api/feedback', optionalAuth, async (req, res) => {
+  if (!dbConnected || !Feedback) {
+    return res.status(503).json({ ok: false, reason: 'Database not connected' });
+  }
+
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (!message) {
+    return res.status(400).json({ ok: false, reason: 'message required' });
+  }
+  if (message.length > 1500) {
+    return res.status(400).json({ ok: false, reason: 'message too long' });
+  }
+
+  try {
+    let doc;
+    if (req.user?.sub) {
+      const user = await User.findById(req.user.sub).select('username email').lean();
+      if (!user) return res.status(401).json({ ok: false, reason: 'Invalid user session' });
+      doc = {
+        userId: req.user.sub,
+        username: user.username,
+        email: user.email,
+        guestName: null,
+        message,
+        source: 'auth',
+      };
+    } else {
+      if (!name) {
+        return res.status(400).json({ ok: false, reason: 'name required for guest feedback' });
+      }
+      if (name.length > 40) {
+        return res.status(400).json({ ok: false, reason: 'name too long' });
+      }
+      doc = {
+        userId: null,
+        username: null,
+        email: null,
+        guestName: name,
+        message,
+        source: 'guest',
+      };
+    }
+
+    const forwardedFor = req.headers['x-forwarded-for'];
+    await Feedback.create({
+      ...doc,
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
+      ip: Array.isArray(forwardedFor) ? forwardedFor[0] : String(forwardedFor || req.socket.remoteAddress || '').slice(0, 120),
+    });
+
+    const sender = doc.username || doc.guestName || 'unknown';
+    console.log(`[Feedback] ${doc.source} from ${sender}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Feedback] Submit error:', err);
+    res.status(500).json({ ok: false, reason: 'Failed to save feedback' });
+  }
 });
 
 // ════════════════════════════════════════════════
