@@ -138,6 +138,9 @@ let myPlayerIdx = 0;       // slot 0-3
 let roomCode    = null;    // 6-char room code
 let socket      = null;    // Socket.io socket
 let mySocketId  = null;
+let currentRoomMode = 'coop';
+let pendingRoomMode = 'coop';
+let myTeam = 'team1';
 
 // socketId â†’ { socketId, name, slot }
 const players = new Map();
@@ -263,6 +266,7 @@ function connectSocket(cb) {
       reconnectionDelayMax: 8000,
       // Longer timeout â€” Render free tier can take 3-5s to wake on first connect
       timeout: 15000,
+      auth: { token: _authToken || '' },
     });
   } catch(e) {
     console.warn('[Socket] io() failed â€” server offline?', e.message);
@@ -297,6 +301,12 @@ function connectSocket(cb) {
   });
 
   // â”€â”€ Room events â”€â”€
+  socket.on('room:summary', (summary) => {
+    _applyRoomSummary(summary);
+    updateLobbyUI();
+    updateLobbyVoiceTiles();
+  });
+
   socket.on('room:player_joined', ({ player }) => {
     players.set(player.socketId, player);
     _resetRemoteStateBuffers(player.slot);
@@ -304,7 +314,7 @@ function connectSocket(cb) {
       x: 60 + player.slot * 40, y: 380,
       vx: 0, vy: 0, facing: 1,
       gravityFlipped: false, alive: true,
-      name: player.name, animFrame: 0,
+      name: player.name, animFrame: 0, team: player.team || 'team1',
     });
     updateLobbyUI();
     updateLobbyVoiceTiles();
@@ -336,6 +346,7 @@ function connectSocket(cb) {
       if (wait) wait.style.display = 'none';
       _setConnStatus('You are now the host');
     }
+    updateLobbyUI();
   });
 
   // â”€â”€ WebRTC voice signaling â”€â”€
@@ -614,6 +625,19 @@ function connectSocket(cb) {
     _updateLagTier(myPing); // adaptive compensation update
     updatePingDisplay();
   });
+
+  socket.on('friends:request', (payload) => {
+    if (typeof handleFriendSocketRequest === 'function') handleFriendSocketRequest(payload);
+  });
+  socket.on('friends:response', (payload) => {
+    if (typeof handleFriendSocketResponse === 'function') handleFriendSocketResponse(payload);
+  });
+  socket.on('friends:invite', (payload) => {
+    if (typeof handleFriendSocketInvite === 'function') handleFriendSocketInvite(payload);
+  });
+  socket.on('friends:presence', (payload) => {
+    if (typeof handleFriendSocketPresence === 'function') handleFriendSocketPresence(payload);
+  });
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -627,6 +651,7 @@ function goToModeSelect() {
     playerName = val || _authUsername || 'PLAYER';
   }
   refreshModeAccountUI();
+  pendingRoomMode = 'coop';
   showScreen('modeScreen');
 }
 
@@ -637,8 +662,17 @@ function startSoloGame() {
 }
 
 function goToRoomScreen() {
+  pendingRoomMode = 'coop';
+  updateRoomScreenModeUI();
   showScreen('roomScreen');
   // Pre-connect socket in background so joining is instant
+  if (!socket || !socket.connected) connectSocket();
+}
+
+function goToPvpRoomScreen() {
+  pendingRoomMode = 'pvp';
+  updateRoomScreenModeUI();
+  showScreen('roomScreen');
   if (!socket || !socket.connected) connectSocket();
 }
 
@@ -658,7 +692,7 @@ function createRoom() {
   setStatus('createStatus', 'Connecting to server...', '');
 
   const doCreate = () => {
-    socket.emit('room:create', { name: playerName }, (res) => {
+    socket.emit('room:create', { name: playerName, mode: pendingRoomMode }, (res) => {
       btn.disabled = false;
       if (!res.ok) {
         setStatus('createStatus', 'Error: ' + (res.reason || 'unknown'), 'err');
@@ -666,6 +700,7 @@ function createRoom() {
       }
       roomCode    = res.code;
       isHost      = true;
+      currentRoomMode = pendingRoomMode;
       myPlayerIdx = res.slot; // always 0 for host
       mySocketId  = socket.id;
 
@@ -694,7 +729,7 @@ function joinRoom() {
   showConnecting('JOINING ROOM...', 'Looking for ' + code);
 
   const doJoin = () => {
-    socket.emit('room:join', { code, name: playerName }, (res) => {
+    socket.emit('room:join', { code, name: playerName, mode: pendingRoomMode }, (res) => {
       hideConnecting();
       if (!res.ok) {
         setStatus('joinStatus', res.reason || 'Could not join', 'err');
@@ -702,6 +737,7 @@ function joinRoom() {
       }
       roomCode    = res.code;
       isHost      = false;
+      currentRoomMode = res.summary?.mode || pendingRoomMode;
       myPlayerIdx = res.slot;
       mySocketId  = socket.id;
 
@@ -718,21 +754,35 @@ function joinRoom() {
   }
 }
 
+function joinRoomByCode(code, mode = 'coop') {
+  const input = document.getElementById('joinCodeInput');
+  if (input) input.value = String(code || '').trim().toUpperCase();
+  pendingRoomMode = mode === 'pvp' ? 'pvp' : 'coop';
+  updateRoomScreenModeUI();
+  showScreen('roomScreen');
+  joinRoom();
+}
+
 function _applyRoomSummary(summary) {
+  currentRoomMode = summary?.mode === 'pvp' ? 'pvp' : 'coop';
+  const prevRemote = new Map(remotePlayers);
   players.clear();
   remotePlayers.clear();
   _resetRemoteStateBuffers();
   summary.players.forEach(p => {
     players.set(p.socketId, p);
+    if (p.socketId === mySocketId) myTeam = p.team || 'team1';
     if (p.socketId !== mySocketId) {
+      const prev = prevRemote.get(p.slot);
       remotePlayers.set(p.slot, {
-        x: 60 + p.slot*40, y: 380,
-        vx: 0, vy: 0, facing: 1,
-        gravityFlipped: false, alive: true,
-        name: p.name, animFrame: 0,
+        x: prev?.x ?? (60 + p.slot*40), y: prev?.y ?? 380,
+        vx: prev?.vx ?? 0, vy: prev?.vy ?? 0, facing: prev?.facing ?? 1,
+        gravityFlipped: prev?.gravityFlipped ?? false, alive: prev?.alive ?? true,
+        name: p.name, animFrame: 0, team: p.team || 'team1',
       });
     }
   });
+  updateRoomScreenModeUI();
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -763,20 +813,28 @@ function enterLobby() {
 }
 
 function buildLobbyState() {
-  return { players: [...players.values()], levelOrder, randomizeMode };
+  return { players: [...players.values()], levelOrder, randomizeMode, mode: currentRoomMode };
 }
 
 function updateLobbyUI() {
   const list = document.getElementById('playerList');
   if (!list) return;
+  const pvpWrap = document.getElementById('pvpTeamsWrap');
+  const pvpPicker = document.getElementById('pvpTeamPicker');
+  const pvpNote = document.getElementById('pvpTeamNote');
+  const isPvp = currentRoomMode === 'pvp';
+  if (pvpWrap) pvpWrap.style.display = isPvp ? 'grid' : 'none';
+  if (pvpPicker) pvpPicker.style.display = isPvp ? 'grid' : 'none';
+  if (pvpNote) pvpNote.style.display = isPvp ? 'block' : 'none';
+  list.style.display = isPvp ? 'none' : 'flex';
   list.innerHTML = '';
 
   // Build slot map â€” self + remote players
   const slotMap = new Map();
-  slotMap.set(myPlayerIdx, { slot: myPlayerIdx, name: playerName, isMe: true });
+  slotMap.set(myPlayerIdx, { slot: myPlayerIdx, name: playerName, isMe: true, team: myTeam });
   players.forEach(p => {
     if (p.socketId !== mySocketId && !slotMap.has(p.slot)) {
-      slotMap.set(p.slot, { slot: p.slot, name: p.name, isMe: false });
+      slotMap.set(p.slot, { slot: p.slot, name: p.name, isMe: false, team: p.team || 'team1' });
     }
   });
 
@@ -788,6 +846,7 @@ function updateLobbyUI() {
       div.innerHTML = `
         <div class="p-color" style="background:${PLAYER_COLORS[i]}"></div>
         <div class="p-name">${p.name}${p.isMe ? ' (YOU)' : ''}</div>
+        ${p.team ? `<div class="p-team">${p.team === 'team2' ? 'T2' : 'T1'}</div>` : ''}
         ${p.slot === 0 ? '<div class="p-host">👑 HOST</div>' : ''}
         <div class="p-ready" style="color:#00ff88;">●</div>
       `;
@@ -796,6 +855,69 @@ function updateLobbyUI() {
     }
     list.appendChild(div);
   }
+  if (isPvp) renderPvpTeams();
+}
+
+function getPvpTeamCounts() {
+  const counts = { team1: 0, team2: 0 };
+  const allPlayers = [{ socketId: mySocketId, slot: myPlayerIdx, name: playerName, team: myTeam }, ...players.values()];
+  const seen = new Set();
+  allPlayers.forEach((p) => {
+    if (!p || seen.has(p.socketId)) return;
+    seen.add(p.socketId);
+    counts[p.team === 'team2' ? 'team2' : 'team1']++;
+  });
+  return counts;
+}
+
+function renderPvpTeams() {
+  const team1List = document.getElementById('team1List');
+  const team2List = document.getElementById('team2List');
+  const team1Count = document.getElementById('team1Count');
+  const team2Count = document.getElementById('team2Count');
+  const btn1 = document.getElementById('pvpTeamBtn1');
+  const btn2 = document.getElementById('pvpTeamBtn2');
+  if (!team1List || !team2List || !team1Count || !team2Count) return;
+  team1List.innerHTML = '';
+  team2List.innerHTML = '';
+  const allPlayers = [{ socketId: mySocketId, slot: myPlayerIdx, name: playerName, team: myTeam, isMe: true }, ...players.values()]
+    .filter((p, idx, arr) => arr.findIndex(x => x.socketId === p.socketId) === idx);
+  let t1 = 0;
+  let t2 = 0;
+  allPlayers.sort((a, b) => a.slot - b.slot).forEach((p) => {
+    const card = document.createElement('div');
+    card.className = 'player-slot';
+    card.innerHTML = `
+      <div class="p-color" style="background:${PLAYER_COLORS[p.slot % PLAYER_COLORS.length]}"></div>
+      <div class="p-name">${p.name}${p.isMe ? ' (YOU)' : ''}</div>
+      ${p.slot === 0 ? '<div class="p-host">👑 HOST</div>' : ''}
+    `;
+    if (p.team === 'team2') {
+      t2++;
+      team2List.appendChild(card);
+    } else {
+      t1++;
+      team1List.appendChild(card);
+    }
+  });
+  team1Count.textContent = `${t1}`;
+  team2Count.textContent = `${t2}`;
+  if (btn1) btn1.classList.toggle('active', myTeam !== 'team2');
+  if (btn2) btn2.classList.toggle('active', myTeam === 'team2');
+}
+
+function setPvpTeam(team) {
+  if (currentRoomMode !== 'pvp' || !socket) return;
+  const normalized = team === 'team2' ? 'team2' : 'team1';
+  socket.emit('room:team', { team: normalized }, (res) => {
+    if (!res?.ok) {
+      _setConnStatus('⚠ ' + (res?.reason || 'Could not switch team'));
+      return;
+    }
+    myTeam = normalized;
+    if (res.summary) _applyRoomSummary(res.summary);
+    updateLobbyUI();
+  });
 }
 
 function addLobbyChat(sender, text, isSystem) {
@@ -815,6 +937,13 @@ function sendLobbyChat() { /* chat removed â€” use voice */ }
 
 function hostStartGame() {
   if (!isHost || !socket) return;
+  if (currentRoomMode === 'pvp') {
+    const counts = getPvpTeamCounts();
+    if (!counts.team1 || !counts.team2) {
+      _setConnStatus('⚠ Need at least one player on each team');
+      return;
+    }
+  }
   buildLevelOrder();
   const chkRope = document.getElementById('chkRope');
   const ropeEnabled = !!(chkRope && chkRope.checked);
@@ -823,6 +952,7 @@ function hostStartGame() {
   socket.emit('room:start', { levelOrder, mpOnlyMode, ropeEnabled }, (res) => {
     if (!res || !res.ok) {
       console.error('[Host] room:start failed:', res);
+      _setConnStatus('⚠ ' + (res?.reason || 'Could not start room'));
       return;
     }
     console.log('[Host] room:start acknowledged — launching game');
@@ -882,6 +1012,9 @@ function leaveLobby() {
   _closeAllPeerConns();
   if (pingInterval) clearInterval(pingInterval);
   multiMode = false;
+  roomCode = null;
+  currentRoomMode = pendingRoomMode;
+  myTeam = 'team1';
   showScreen('roomScreen');
 }
 
@@ -892,6 +1025,9 @@ function leaveToModeSelect() {
   AUDIO._bgFile = null;
   gameState = 'idle';
   multiMode = false;
+  roomCode = null;
+  currentRoomMode = 'coop';
+  myTeam = 'team1';
   _resetRemoteStateBuffers();
   showScreen('modeScreen');
 }
@@ -906,11 +1042,30 @@ function leaveGame() {
   micEnabled = false;
   if (pingInterval) clearInterval(pingInterval);
   multiMode = false;
+  roomCode = null;
+  currentRoomMode = 'coop';
+  myTeam = 'team1';
   if (animFrame) cancelAnimationFrame(animFrame);
   document.getElementById('pingDisplay').style.display = 'none';
   ['inGameMicBtn','inGameLeaveBtn'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
   document.getElementById('voicePanel').innerHTML = '';
   showScreen('modeScreen');
+}
+
+function updateRoomScreenModeUI() {
+  const title = document.getElementById('roomScreenTitle');
+  const badge = document.getElementById('roomModeBadge');
+  const createBtn = document.getElementById('createRoomBtn');
+  const joinBtn = document.querySelector('#roomScreen .room-input-row .btn');
+  const createStatus = document.getElementById('createStatus');
+  const joinStatus = document.getElementById('joinStatus');
+  const isPvp = pendingRoomMode === 'pvp';
+  if (title) title.textContent = isPvp ? 'PVP BATTLE' : 'MULTIPLAYER';
+  if (badge) badge.textContent = isPvp ? 'PVP ROOM · PICK A SIDE' : 'CO-OP ROOM';
+  if (createBtn) createBtn.textContent = isPvp ? 'CREATE PVP ROOM' : 'CREATE ROOM';
+  if (joinBtn) joinBtn.textContent = isPvp ? 'JOIN PVP' : 'JOIN';
+  if (createStatus) createStatus.textContent = isPvp ? 'Create a code for a PvP team room' : 'Ready to create a room';
+  if (joinStatus) joinStatus.textContent = isPvp ? 'Enter a PvP room code to join' : 'Enter a room code to join';
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -1872,12 +2027,15 @@ function createVoiceTile(slot, name, stream, isMe) {
 
   const micEl    = document.createElement('div');
   micEl.className = 'vt-mic';
+  micEl.id = `vt-mic-${slot}`;
   if (isMe) {
     micEl.textContent = micEnabled ? '🎙️' : '🔇';
+    micEl.classList.add(micEnabled ? 'live' : 'off');
     micEl.onclick  = toggleMic;
     micEl.style.cursor = 'pointer';
   } else {
-    micEl.textContent = stream ? '🔊' : '○';
+    micEl.textContent = stream ? '🎧' : '🔇';
+    micEl.classList.add(stream ? 'idle' : 'off');
   }
 
   tile.appendChild(avatar);
@@ -1906,8 +2064,20 @@ function removeVoiceTile(slot) {
 function updateSpeakingIndicators() {
   [myPlayerIdx, ...remotePlayers.keys()].forEach(slot => {
     const av = document.getElementById(`vt-avatar-${slot}`);
+    const mic = document.getElementById(`vt-mic-${slot}`);
     if (!av) return;
-    av.classList.toggle('speaking', isSpeaking(slot));
+    const speaking = isSpeaking(slot);
+    av.classList.toggle('speaking', speaking);
+    if (!mic) return;
+    mic.classList.remove('live', 'idle', 'off');
+    if (slot === myPlayerIdx) {
+      mic.textContent = micEnabled ? (speaking ? '🗣️' : '🎙️') : '🔇';
+      mic.classList.add(micEnabled ? (speaking ? 'live' : 'idle') : 'off');
+      return;
+    }
+    const hasStream = remoteStreams.has(slot);
+    mic.textContent = !hasStream ? '🔇' : (speaking ? '🗣️' : '🎧');
+    mic.classList.add(!hasStream ? 'off' : (speaking ? 'live' : 'idle'));
   });
 }
 
@@ -2465,11 +2635,18 @@ function drawRemotePlayer(rp, colorIdx, slot) {
     ctx.fillStyle = PLAYER_COLORS[colorIdx];
   }
 
-  ctx.fillText(rp.name, x + PLAYER_W/2, y - 6);
+  const teamLabel = currentRoomMode === 'pvp' ? (rp.team === 'team2' ? 'T2 ' : 'T1 ') : '';
+  ctx.fillText(teamLabel + rp.name, x + PLAYER_W/2, y - 6);
+
+  if (currentRoomMode === 'pvp') {
+    ctx.fillStyle = rp.team === 'team2' ? '#ff9b6b' : '#6bc5ff';
+    ctx.fillText(rp.team === 'team2' ? 'T2' : 'T1', x + PLAYER_W/2, y - 18);
+    ctx.fillStyle = PLAYER_COLORS[colorIdx];
+  }
 
   if (speaking) {
     ctx.fillStyle = '#00ff88';
-    ctx.fillText('🎙️', x + PLAYER_W/2, y - 18);
+    ctx.fillText('🎙️', x + PLAYER_W/2, y - (currentRoomMode === 'pvp' ? 30 : 18));
   }
 
   ctx.textAlign = 'left';
@@ -2787,18 +2964,32 @@ let _authToken    = null;
 let _authUsername = null;
 let _authUserId   = null;
 let _authEmail    = null;
+let _friendsState = { friends: [], incoming: [], outgoing: [], invites: [] };
 
 function _authSaveToken(token, username, userId, email = null) {
   _authToken    = token;
   _authUsername = username;
   _authUserId   = userId;
   _authEmail    = email || null;
+  if (typeof socket !== 'undefined' && socket) {
+    socket.auth = { token: _authToken || '' };
+    if (socket.connected) {
+      try { socket.disconnect().connect(); } catch {}
+    }
+  }
   try { localStorage.setItem(AUTH_TOKEN_KEY, JSON.stringify({ token, username, userId, email: _authEmail })); } catch {}
   refreshModeAccountUI();
 }
 
 function _authClearToken() {
   _authToken = _authUsername = _authUserId = _authEmail = null;
+  _friendsState = { friends: [], incoming: [], outgoing: [], invites: [] };
+  if (typeof socket !== 'undefined' && socket) {
+    socket.auth = { token: '' };
+    if (socket.connected) {
+      try { socket.disconnect().connect(); } catch {}
+    }
+  }
   try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch {}
   refreshModeAccountUI();
 }
@@ -2927,6 +3118,7 @@ async function authLogout() {
   _authMsg(document.getElementById('liMsg'), 'LOGGED OUT. LOGIN WITH ANOTHER ACCOUNT.', 'info');
   authShowTab('login');
   closeFeedback();
+  closeFriendsOverlay();
   showScreen('nameScreen');
   if (logoutBtn) logoutBtn.disabled = false;
 }
@@ -2961,6 +3153,223 @@ function _feedbackMsg(text, cls = 'info') {
   if (!el) return;
   el.textContent = text;
   el.className = 'feedback-msg ' + cls;
+}
+
+function _friendsMsg(text, cls = 'info') {
+  const el = document.getElementById('friendsMsg');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'friends-msg ' + cls;
+}
+
+function openFriendsOverlay() {
+  const overlay = document.getElementById('friendsOverlay');
+  if (!overlay) return;
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+  if (!_authToken) {
+    _friendsMsg('LOGIN IS REQUIRED TO USE FRIENDS, INVITES, AND ONLINE STATUS.', 'err');
+    renderFriendsUI();
+    return;
+  }
+  _friendsMsg('Loading friends...', 'info');
+  if (!socket || !socket.connected) {
+    connectSocket(() => loadFriendsData());
+  } else {
+    loadFriendsData();
+  }
+}
+
+function closeFriendsOverlay() {
+  const overlay = document.getElementById('friendsOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden', 'true');
+}
+
+async function loadFriendsData() {
+  if (!_authToken) {
+    renderFriendsUI();
+    return;
+  }
+  try {
+    const res = await fetch('/api/friends', { headers: _authHeaders() });
+    const data = await res.json();
+    if (!data.ok) {
+      _friendsMsg(data.reason || 'FAILED TO LOAD FRIENDS.', 'err');
+      return;
+    }
+    _friendsState.friends = data.friends || [];
+    _friendsState.incoming = data.incoming || [];
+    _friendsState.outgoing = data.outgoing || [];
+    _friendsState.invites = _friendsState.invites || [];
+    renderFriendsUI();
+    _friendsMsg(roomCode ? `Room ${roomCode} is ready for friend invites.` : 'Friends loaded.', 'ok');
+  } catch {
+    _friendsMsg('SERVER UNREACHABLE. COULD NOT LOAD FRIENDS.', 'err');
+  }
+}
+
+function renderFriendsUI() {
+  const friendsList = document.getElementById('friendsList');
+  const incomingList = document.getElementById('friendsIncomingList');
+  const outgoingList = document.getElementById('friendsOutgoingList');
+  if (!friendsList || !incomingList || !outgoingList) return;
+  if (!_authToken) {
+    friendsList.innerHTML = '<div class="friend-card"><div class="friend-top">LOGIN NEEDED</div><div class="friend-status offline">Sign in to add friends, see who is online, and invite them straight into your lobby.</div></div>';
+    incomingList.innerHTML = '';
+    outgoingList.innerHTML = '';
+    return;
+  }
+
+  friendsList.innerHTML = _friendsState.friends.length ? _friendsState.friends.map((f) => `
+    <div class="friend-card">
+      <div class="friend-top">
+        <span>${escHtml(f.username)}</span>
+        <span class="friend-status ${f.online ? 'online' : 'offline'}">${f.online ? 'ONLINE' : 'OFFLINE'}</span>
+      </div>
+      <div class="friend-actions">
+        ${roomCode ? `<button class="friend-mini" onclick="inviteFriendToRoom('${escHtml(f.userId)}')">INVITE</button>` : ''}
+      </div>
+    </div>
+  `).join('') : '<div class="friend-card"><div class="friend-top">NO FRIENDS YET</div><div class="friend-status offline">Send a request by username to build your friends list.</div></div>';
+
+  const inviteCards = (_friendsState.invites || []).map((inv) => `
+    <div class="friend-card">
+      <div class="friend-top"><span>${escHtml(inv.fromUsername)} INVITED YOU</span><span class="friend-status online">${escHtml((inv.roomMode || 'coop').toUpperCase())}</span></div>
+      <div class="friend-actions">
+        <button class="friend-mini accept" onclick="acceptFriendInvite('${escHtml(inv.roomCode)}','${escHtml(inv.roomMode || 'coop')}')">JOIN ${escHtml(inv.roomCode)}</button>
+      </div>
+    </div>
+  `).join('');
+
+  incomingList.innerHTML = inviteCards + (_friendsState.incoming.length ? _friendsState.incoming.map((req) => `
+    <div class="friend-card">
+      <div class="friend-top"><span>${escHtml(req.fromUsername)}</span><span class="friend-status online">REQUEST</span></div>
+      <div class="friend-actions">
+        <button class="friend-mini accept" onclick="respondToFriendRequest('${escHtml(req.requestId)}', true)">ACCEPT</button>
+        <button class="friend-mini reject" onclick="respondToFriendRequest('${escHtml(req.requestId)}', false)">REJECT</button>
+      </div>
+    </div>
+  `).join('') : '<div class="friend-card"><div class="friend-top">NO REQUESTS</div></div>');
+
+  outgoingList.innerHTML = _friendsState.outgoing.length ? _friendsState.outgoing.map((req) => `
+    <div class="friend-card">
+      <div class="friend-top"><span>TO ${escHtml(req.toUsername)}</span><span class="friend-status offline">PENDING</span></div>
+    </div>
+  `).join('') : '<div class="friend-card"><div class="friend-top">NO OUTGOING REQUESTS</div></div>';
+}
+
+async function sendFriendRequest() {
+  if (!_authToken) {
+    _friendsMsg('LOGIN IS REQUIRED TO ADD FRIENDS.', 'err');
+    return;
+  }
+  const input = document.getElementById('friendUsernameInput');
+  const username = (input?.value || '').trim();
+  if (!username) {
+    _friendsMsg('ENTER A USERNAME FIRST.', 'err');
+    return;
+  }
+  _friendsMsg('Sending friend request...', 'info');
+  try {
+    const res = await fetch('/api/friends/request', {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ username }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      _friendsMsg(data.reason || 'FAILED TO SEND REQUEST.', 'err');
+      return;
+    }
+    if (input) input.value = '';
+    _friendsMsg(`Friend request sent to ${data.toUsername}.`, 'ok');
+    loadFriendsData();
+  } catch {
+    _friendsMsg('SERVER UNREACHABLE. REQUEST NOT SENT.', 'err');
+  }
+}
+
+async function respondToFriendRequest(requestId, accept) {
+  if (!_authToken) return;
+  _friendsMsg(accept ? 'Accepting request...' : 'Rejecting request...', 'info');
+  try {
+    const res = await fetch('/api/friends/respond', {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ requestId, accept }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      _friendsMsg(data.reason || 'FAILED TO UPDATE REQUEST.', 'err');
+      return;
+    }
+    _friendsMsg(accept ? 'Friend added.' : 'Request rejected.', 'ok');
+    loadFriendsData();
+  } catch {
+    _friendsMsg('SERVER UNREACHABLE. REQUEST NOT UPDATED.', 'err');
+  }
+}
+
+async function inviteFriendToRoom(friendUserId) {
+  if (!_authToken) {
+    _friendsMsg('LOGIN IS REQUIRED TO INVITE FRIENDS.', 'err');
+    return;
+  }
+  if (!roomCode) {
+    _friendsMsg('CREATE OR JOIN A ROOM FIRST.', 'err');
+    return;
+  }
+  try {
+    const res = await fetch('/api/friends/invite', {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ friendUserId, roomCode, roomMode: currentRoomMode }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      _friendsMsg(data.reason || 'FAILED TO SEND INVITE.', 'err');
+      return;
+    }
+    _friendsMsg(`Invite sent for room ${roomCode}.`, 'ok');
+  } catch {
+    _friendsMsg('SERVER UNREACHABLE. INVITE NOT SENT.', 'err');
+  }
+}
+
+function acceptFriendInvite(code, mode) {
+  closeFriendsOverlay();
+  if (gameState === 'playing') leaveGame();
+  else if (roomCode) leaveLobby();
+  setTimeout(() => joinRoomByCode(code, mode || 'coop'), 120);
+}
+
+function handleFriendSocketRequest(payload) {
+  _friendsMsg(`${payload.fromUsername} sent you a friend request.`, 'ok');
+  loadFriendsData();
+}
+
+function handleFriendSocketResponse(payload) {
+  _friendsMsg(payload.accepted ? `${payload.username} accepted your request.` : `${payload.username} rejected your request.`, payload.accepted ? 'ok' : 'info');
+  loadFriendsData();
+}
+
+function handleFriendSocketInvite(payload) {
+  _friendsState.invites = _friendsState.invites || [];
+  _friendsState.invites = [
+    payload,
+    ..._friendsState.invites.filter((inv) => !(inv.roomCode === payload.roomCode && inv.fromUserId === payload.fromUserId))
+  ].slice(0, 8);
+  renderFriendsUI();
+  _friendsMsg(`${payload.fromUsername} invited you to room ${payload.roomCode}.`, 'ok');
+}
+
+function handleFriendSocketPresence(payload) {
+  _friendsState.friends = (_friendsState.friends || []).map((friend) =>
+    String(friend.userId) === String(payload.userId) ? { ...friend, online: !!payload.online } : friend
+  );
+  renderFriendsUI();
 }
 
 function openFeedback() {
@@ -7348,7 +7757,12 @@ function drawPlayer() {
     ctx.font = '7px monospace';
     ctx.fillStyle = PLAYER_COLORS[myPlayerIdx];
     ctx.textAlign = 'center';
-    ctx.fillText(playerName + ' (YOU)', x + PLAYER_W/2, y - 6);
+    const localTag = currentRoomMode === 'pvp' ? (myTeam === 'team2' ? 'T2 ' : 'T1 ') : '';
+    ctx.fillText(localTag + playerName + ' (YOU)', x + PLAYER_W/2, y - 6);
+    if (currentRoomMode === 'pvp') {
+      ctx.fillStyle = myTeam === 'team2' ? '#ff9b6b' : '#6bc5ff';
+      ctx.fillText(myTeam === 'team2' ? 'T2' : 'T1', x + PLAYER_W/2, y - 18);
+    }
     ctx.textAlign = 'left';
     ctx.restore();
   }

@@ -5,18 +5,32 @@ let _authToken    = null;
 let _authUsername = null;
 let _authUserId   = null;
 let _authEmail    = null;
+let _friendsState = { friends: [], incoming: [], outgoing: [], invites: [] };
 
 function _authSaveToken(token, username, userId, email = null) {
   _authToken    = token;
   _authUsername = username;
   _authUserId   = userId;
   _authEmail    = email || null;
+  if (typeof socket !== 'undefined' && socket) {
+    socket.auth = { token: _authToken || '' };
+    if (socket.connected) {
+      try { socket.disconnect().connect(); } catch {}
+    }
+  }
   try { localStorage.setItem(AUTH_TOKEN_KEY, JSON.stringify({ token, username, userId, email: _authEmail })); } catch {}
   refreshModeAccountUI();
 }
 
 function _authClearToken() {
   _authToken = _authUsername = _authUserId = _authEmail = null;
+  _friendsState = { friends: [], incoming: [], outgoing: [], invites: [] };
+  if (typeof socket !== 'undefined' && socket) {
+    socket.auth = { token: '' };
+    if (socket.connected) {
+      try { socket.disconnect().connect(); } catch {}
+    }
+  }
   try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch {}
   refreshModeAccountUI();
 }
@@ -145,6 +159,7 @@ async function authLogout() {
   _authMsg(document.getElementById('liMsg'), 'LOGGED OUT. LOGIN WITH ANOTHER ACCOUNT.', 'info');
   authShowTab('login');
   closeFeedback();
+  closeFriendsOverlay();
   showScreen('nameScreen');
   if (logoutBtn) logoutBtn.disabled = false;
 }
@@ -179,6 +194,223 @@ function _feedbackMsg(text, cls = 'info') {
   if (!el) return;
   el.textContent = text;
   el.className = 'feedback-msg ' + cls;
+}
+
+function _friendsMsg(text, cls = 'info') {
+  const el = document.getElementById('friendsMsg');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'friends-msg ' + cls;
+}
+
+function openFriendsOverlay() {
+  const overlay = document.getElementById('friendsOverlay');
+  if (!overlay) return;
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+  if (!_authToken) {
+    _friendsMsg('LOGIN IS REQUIRED TO USE FRIENDS, INVITES, AND ONLINE STATUS.', 'err');
+    renderFriendsUI();
+    return;
+  }
+  _friendsMsg('Loading friends...', 'info');
+  if (!socket || !socket.connected) {
+    connectSocket(() => loadFriendsData());
+  } else {
+    loadFriendsData();
+  }
+}
+
+function closeFriendsOverlay() {
+  const overlay = document.getElementById('friendsOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden', 'true');
+}
+
+async function loadFriendsData() {
+  if (!_authToken) {
+    renderFriendsUI();
+    return;
+  }
+  try {
+    const res = await fetch('/api/friends', { headers: _authHeaders() });
+    const data = await res.json();
+    if (!data.ok) {
+      _friendsMsg(data.reason || 'FAILED TO LOAD FRIENDS.', 'err');
+      return;
+    }
+    _friendsState.friends = data.friends || [];
+    _friendsState.incoming = data.incoming || [];
+    _friendsState.outgoing = data.outgoing || [];
+    _friendsState.invites = _friendsState.invites || [];
+    renderFriendsUI();
+    _friendsMsg(roomCode ? `Room ${roomCode} is ready for friend invites.` : 'Friends loaded.', 'ok');
+  } catch {
+    _friendsMsg('SERVER UNREACHABLE. COULD NOT LOAD FRIENDS.', 'err');
+  }
+}
+
+function renderFriendsUI() {
+  const friendsList = document.getElementById('friendsList');
+  const incomingList = document.getElementById('friendsIncomingList');
+  const outgoingList = document.getElementById('friendsOutgoingList');
+  if (!friendsList || !incomingList || !outgoingList) return;
+  if (!_authToken) {
+    friendsList.innerHTML = '<div class="friend-card"><div class="friend-top">LOGIN NEEDED</div><div class="friend-status offline">Sign in to add friends, see who is online, and invite them straight into your lobby.</div></div>';
+    incomingList.innerHTML = '';
+    outgoingList.innerHTML = '';
+    return;
+  }
+
+  friendsList.innerHTML = _friendsState.friends.length ? _friendsState.friends.map((f) => `
+    <div class="friend-card">
+      <div class="friend-top">
+        <span>${escHtml(f.username)}</span>
+        <span class="friend-status ${f.online ? 'online' : 'offline'}">${f.online ? 'ONLINE' : 'OFFLINE'}</span>
+      </div>
+      <div class="friend-actions">
+        ${roomCode ? `<button class="friend-mini" onclick="inviteFriendToRoom('${escHtml(f.userId)}')">INVITE</button>` : ''}
+      </div>
+    </div>
+  `).join('') : '<div class="friend-card"><div class="friend-top">NO FRIENDS YET</div><div class="friend-status offline">Send a request by username to build your friends list.</div></div>';
+
+  const inviteCards = (_friendsState.invites || []).map((inv) => `
+    <div class="friend-card">
+      <div class="friend-top"><span>${escHtml(inv.fromUsername)} INVITED YOU</span><span class="friend-status online">${escHtml((inv.roomMode || 'coop').toUpperCase())}</span></div>
+      <div class="friend-actions">
+        <button class="friend-mini accept" onclick="acceptFriendInvite('${escHtml(inv.roomCode)}','${escHtml(inv.roomMode || 'coop')}')">JOIN ${escHtml(inv.roomCode)}</button>
+      </div>
+    </div>
+  `).join('');
+
+  incomingList.innerHTML = inviteCards + (_friendsState.incoming.length ? _friendsState.incoming.map((req) => `
+    <div class="friend-card">
+      <div class="friend-top"><span>${escHtml(req.fromUsername)}</span><span class="friend-status online">REQUEST</span></div>
+      <div class="friend-actions">
+        <button class="friend-mini accept" onclick="respondToFriendRequest('${escHtml(req.requestId)}', true)">ACCEPT</button>
+        <button class="friend-mini reject" onclick="respondToFriendRequest('${escHtml(req.requestId)}', false)">REJECT</button>
+      </div>
+    </div>
+  `).join('') : '<div class="friend-card"><div class="friend-top">NO REQUESTS</div></div>');
+
+  outgoingList.innerHTML = _friendsState.outgoing.length ? _friendsState.outgoing.map((req) => `
+    <div class="friend-card">
+      <div class="friend-top"><span>TO ${escHtml(req.toUsername)}</span><span class="friend-status offline">PENDING</span></div>
+    </div>
+  `).join('') : '<div class="friend-card"><div class="friend-top">NO OUTGOING REQUESTS</div></div>';
+}
+
+async function sendFriendRequest() {
+  if (!_authToken) {
+    _friendsMsg('LOGIN IS REQUIRED TO ADD FRIENDS.', 'err');
+    return;
+  }
+  const input = document.getElementById('friendUsernameInput');
+  const username = (input?.value || '').trim();
+  if (!username) {
+    _friendsMsg('ENTER A USERNAME FIRST.', 'err');
+    return;
+  }
+  _friendsMsg('Sending friend request...', 'info');
+  try {
+    const res = await fetch('/api/friends/request', {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ username }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      _friendsMsg(data.reason || 'FAILED TO SEND REQUEST.', 'err');
+      return;
+    }
+    if (input) input.value = '';
+    _friendsMsg(`Friend request sent to ${data.toUsername}.`, 'ok');
+    loadFriendsData();
+  } catch {
+    _friendsMsg('SERVER UNREACHABLE. REQUEST NOT SENT.', 'err');
+  }
+}
+
+async function respondToFriendRequest(requestId, accept) {
+  if (!_authToken) return;
+  _friendsMsg(accept ? 'Accepting request...' : 'Rejecting request...', 'info');
+  try {
+    const res = await fetch('/api/friends/respond', {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ requestId, accept }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      _friendsMsg(data.reason || 'FAILED TO UPDATE REQUEST.', 'err');
+      return;
+    }
+    _friendsMsg(accept ? 'Friend added.' : 'Request rejected.', 'ok');
+    loadFriendsData();
+  } catch {
+    _friendsMsg('SERVER UNREACHABLE. REQUEST NOT UPDATED.', 'err');
+  }
+}
+
+async function inviteFriendToRoom(friendUserId) {
+  if (!_authToken) {
+    _friendsMsg('LOGIN IS REQUIRED TO INVITE FRIENDS.', 'err');
+    return;
+  }
+  if (!roomCode) {
+    _friendsMsg('CREATE OR JOIN A ROOM FIRST.', 'err');
+    return;
+  }
+  try {
+    const res = await fetch('/api/friends/invite', {
+      method: 'POST',
+      headers: _authHeaders(),
+      body: JSON.stringify({ friendUserId, roomCode, roomMode: currentRoomMode }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      _friendsMsg(data.reason || 'FAILED TO SEND INVITE.', 'err');
+      return;
+    }
+    _friendsMsg(`Invite sent for room ${roomCode}.`, 'ok');
+  } catch {
+    _friendsMsg('SERVER UNREACHABLE. INVITE NOT SENT.', 'err');
+  }
+}
+
+function acceptFriendInvite(code, mode) {
+  closeFriendsOverlay();
+  if (gameState === 'playing') leaveGame();
+  else if (roomCode) leaveLobby();
+  setTimeout(() => joinRoomByCode(code, mode || 'coop'), 120);
+}
+
+function handleFriendSocketRequest(payload) {
+  _friendsMsg(`${payload.fromUsername} sent you a friend request.`, 'ok');
+  loadFriendsData();
+}
+
+function handleFriendSocketResponse(payload) {
+  _friendsMsg(payload.accepted ? `${payload.username} accepted your request.` : `${payload.username} rejected your request.`, payload.accepted ? 'ok' : 'info');
+  loadFriendsData();
+}
+
+function handleFriendSocketInvite(payload) {
+  _friendsState.invites = _friendsState.invites || [];
+  _friendsState.invites = [
+    payload,
+    ..._friendsState.invites.filter((inv) => !(inv.roomCode === payload.roomCode && inv.fromUserId === payload.fromUserId))
+  ].slice(0, 8);
+  renderFriendsUI();
+  _friendsMsg(`${payload.fromUsername} invited you to room ${payload.roomCode}.`, 'ok');
+}
+
+function handleFriendSocketPresence(payload) {
+  _friendsState.friends = (_friendsState.friends || []).map((friend) =>
+    String(friend.userId) === String(payload.userId) ? { ...friend, online: !!payload.online } : friend
+  );
+  renderFriendsUI();
 }
 
 function openFeedback() {

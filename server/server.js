@@ -30,7 +30,7 @@ const jwt         = require('jsonwebtoken');
 
 // ─── CONFIG ──────────────────────────────────
 const PORT           = process.env.PORT        || 3000;
-const MONGO_URI      = process.env.MONGODB_URI || '';
+const MONGO_URI      = process.env.MONGODB_URI || 'mongodb+srv://sunbreathing13form:Pimse123@cluster0.ny9by.mongodb.net/leveldevil';
 const JWT_SECRET     = process.env.JWT_SECRET  || 'level_devil_jwt_secret_change_me';
 const JWT_EXPIRES    = '30d';   // stay logged in for 30 days
 const MAX_PLAYERS    = 4;
@@ -97,7 +97,28 @@ const FeedbackSchema = new mongoose.Schema({
 });
 FeedbackSchema.index({ createdAt: -1 });
 
-let User, Score, Feedback;
+const FriendLinkSchema = new mongoose.Schema({
+  pairKey:    { type: String, required: true, unique: true },
+  userA:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  userB:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  createdAt:  { type: Date, default: Date.now },
+});
+FriendLinkSchema.index({ userA: 1 });
+FriendLinkSchema.index({ userB: 1 });
+
+const FriendRequestSchema = new mongoose.Schema({
+  fromUserId:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  fromUsername:{ type: String, required: true, trim: true, maxlength: 20 },
+  toUserId:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  toUsername:  { type: String, required: true, trim: true, maxlength: 20 },
+  status:      { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' },
+  createdAt:   { type: Date, default: Date.now },
+  respondedAt: { type: Date, default: null },
+});
+FriendRequestSchema.index({ toUserId: 1, status: 1, createdAt: -1 });
+FriendRequestSchema.index({ fromUserId: 1, status: 1, createdAt: -1 });
+
+let User, Score, Feedback, FriendLink, FriendRequest;
 if (MONGO_URI) {
   mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 5000 })
     .then(() => {
@@ -105,6 +126,8 @@ if (MONGO_URI) {
       User     = mongoose.model('User', UserSchema);
       Score    = mongoose.model('Score', ScoreSchema);
       Feedback = mongoose.model('Feedback', FeedbackSchema);
+      FriendLink = mongoose.model('FriendLink', FriendLinkSchema);
+      FriendRequest = mongoose.model('FriendRequest', FriendRequestSchema);
       console.log('[MongoDB] Connected to Atlas ✓');
     })
     .catch(err => {
@@ -144,6 +167,63 @@ function requireAuth(req, res, next) {
   if (!payload) return res.status(401).json({ ok: false, reason: 'Not authenticated' });
   req.user = payload;
   next();
+}
+
+function makeFriendPairKey(idA, idB) {
+  return [String(idA), String(idB)].sort().join(':');
+}
+
+const onlineUsers = new Map(); // userId -> Set(socketId)
+const socketUsers = new Map(); // socketId -> { userId, username }
+
+function addOnlineSocket(userId, username, socketId) {
+  const key = String(userId);
+  if (!onlineUsers.has(key)) onlineUsers.set(key, new Set());
+  onlineUsers.get(key).add(socketId);
+  socketUsers.set(socketId, { userId: key, username });
+}
+
+function removeOnlineSocket(socketId) {
+  const user = socketUsers.get(socketId);
+  if (!user) return null;
+  socketUsers.delete(socketId);
+  const set = onlineUsers.get(user.userId);
+  if (set) {
+    set.delete(socketId);
+    if (set.size === 0) onlineUsers.delete(user.userId);
+  }
+  return user;
+}
+
+function isUserOnline(userId) {
+  const set = onlineUsers.get(String(userId));
+  return !!(set && set.size);
+}
+
+function emitToUser(userId, event, payload) {
+  const set = onlineUsers.get(String(userId));
+  if (!set) return;
+  for (const socketId of set) io.to(socketId).emit(event, payload);
+}
+
+async function notifyFriendsPresence(userId, online) {
+  if (!dbConnected || !FriendLink || !User || !userId) return;
+  try {
+    const links = await FriendLink.find({ $or: [{ userA: userId }, { userB: userId }] }).lean();
+    if (!links.length) return;
+    const user = await User.findById(userId).select('username').lean();
+    const payload = {
+      userId: String(userId),
+      username: user?.username || 'Unknown',
+      online: !!online,
+    };
+    for (const link of links) {
+      const friendId = String(String(link.userA) === String(userId) ? link.userB : link.userA);
+      emitToUser(friendId, 'friends:presence', payload);
+    }
+  } catch (err) {
+    console.warn('[Friends] presence notify error:', err.message);
+  }
 }
 
 // ─── APP SETUP ───────────────────────────────
@@ -327,6 +407,144 @@ app.post('/api/feedback', optionalAuth, async (req, res) => {
   }
 });
 
+// GET /api/friends
+app.get('/api/friends', requireAuth, async (req, res) => {
+  if (!dbConnected || !FriendLink || !FriendRequest) {
+    return res.status(503).json({ ok: false, reason: 'Database not connected', friends: [], incoming: [], outgoing: [], invites: [] });
+  }
+  try {
+    const userId = req.user.sub;
+    const [links, incoming, outgoing] = await Promise.all([
+      FriendLink.find({ $or: [{ userA: userId }, { userB: userId }] }).lean(),
+      FriendRequest.find({ toUserId: userId, status: 'pending' }).sort({ createdAt: -1 }).lean(),
+      FriendRequest.find({ fromUserId: userId, status: 'pending' }).sort({ createdAt: -1 }).lean(),
+    ]);
+
+    const friendIds = links.map(l => String(String(l.userA) === String(userId) ? l.userB : l.userA));
+    const friendUsers = friendIds.length
+      ? await User.find({ _id: { $in: friendIds } }).select('_id username').lean()
+      : [];
+    const friendMap = new Map(friendUsers.map(u => [String(u._id), u]));
+
+    const friends = friendIds.map(fid => ({
+      userId: fid,
+      username: friendMap.get(fid)?.username || 'Unknown',
+      online: isUserOnline(fid),
+    })).sort((a, b) => Number(b.online) - Number(a.online) || a.username.localeCompare(b.username));
+
+    res.json({
+      ok: true,
+      friends,
+      incoming: incoming.map(r => ({ requestId: r._id, fromUserId: r.fromUserId, fromUsername: r.fromUsername, createdAt: r.createdAt })),
+      outgoing: outgoing.map(r => ({ requestId: r._id, toUserId: r.toUserId, toUsername: r.toUsername, createdAt: r.createdAt })),
+    });
+  } catch (err) {
+    console.error('[Friends] list error:', err);
+    res.status(500).json({ ok: false, reason: 'Failed to load friends', friends: [], incoming: [], outgoing: [] });
+  }
+});
+
+// POST /api/friends/request
+app.post('/api/friends/request', requireAuth, async (req, res) => {
+  if (!dbConnected || !FriendLink || !FriendRequest) {
+    return res.status(503).json({ ok: false, reason: 'Database not connected' });
+  }
+  const username = String(req.body?.username || '').trim();
+  if (!username) return res.status(400).json({ ok: false, reason: 'username required' });
+  try {
+    const target = await User.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } }).select('_id username').lean();
+    if (!target) return res.status(404).json({ ok: false, reason: 'Player not found' });
+    if (String(target._id) === String(req.user.sub)) return res.status(400).json({ ok: false, reason: 'Cannot add yourself' });
+    const pairKey = makeFriendPairKey(req.user.sub, target._id);
+    const existingLink = await FriendLink.findOne({ pairKey }).lean();
+    if (existingLink) return res.status(409).json({ ok: false, reason: 'Already friends' });
+    const existingPending = await FriendRequest.findOne({
+      $or: [
+        { fromUserId: req.user.sub, toUserId: target._id, status: 'pending' },
+        { fromUserId: target._id, toUserId: req.user.sub, status: 'pending' },
+      ],
+    }).lean();
+    if (existingPending) return res.status(409).json({ ok: false, reason: 'Friend request already pending' });
+
+    const doc = await FriendRequest.create({
+      fromUserId: req.user.sub,
+      fromUsername: req.user.username,
+      toUserId: target._id,
+      toUsername: target.username,
+      status: 'pending',
+    });
+    emitToUser(target._id, 'friends:request', {
+      requestId: String(doc._id),
+      fromUserId: req.user.sub,
+      fromUsername: req.user.username,
+    });
+    res.json({ ok: true, requestId: doc._id, toUsername: target.username });
+  } catch (err) {
+    console.error('[Friends] request error:', err);
+    res.status(500).json({ ok: false, reason: 'Failed to send friend request' });
+  }
+});
+
+// POST /api/friends/respond
+app.post('/api/friends/respond', requireAuth, async (req, res) => {
+  if (!dbConnected || !FriendLink || !FriendRequest) {
+    return res.status(503).json({ ok: false, reason: 'Database not connected' });
+  }
+  const requestId = String(req.body?.requestId || '').trim();
+  const accept = !!req.body?.accept;
+  if (!requestId) return res.status(400).json({ ok: false, reason: 'requestId required' });
+  try {
+    const request = await FriendRequest.findOne({ _id: requestId, toUserId: req.user.sub, status: 'pending' });
+    if (!request) return res.status(404).json({ ok: false, reason: 'Request not found' });
+    request.status = accept ? 'accepted' : 'rejected';
+    request.respondedAt = new Date();
+    await request.save();
+
+    if (accept) {
+      const pairKey = makeFriendPairKey(request.fromUserId, request.toUserId);
+      await FriendLink.findOneAndUpdate(
+        { pairKey },
+        { pairKey, userA: request.fromUserId, userB: request.toUserId, createdAt: new Date() },
+        { upsert: true, new: true }
+      );
+    }
+
+    emitToUser(request.fromUserId, 'friends:response', {
+      requestId: String(request._id),
+      accepted: accept,
+      username: req.user.username,
+    });
+    res.json({ ok: true, accepted: accept });
+  } catch (err) {
+    console.error('[Friends] respond error:', err);
+    res.status(500).json({ ok: false, reason: 'Failed to respond to request' });
+  }
+});
+
+// POST /api/friends/invite
+app.post('/api/friends/invite', requireAuth, async (req, res) => {
+  if (!dbConnected || !FriendLink) {
+    return res.status(503).json({ ok: false, reason: 'Database not connected' });
+  }
+  const friendUserId = String(req.body?.friendUserId || '').trim();
+  const roomCode = String(req.body?.roomCode || '').trim().toUpperCase();
+  const roomMode = String(req.body?.roomMode || 'coop').trim().toLowerCase();
+  if (!friendUserId || !roomCode) return res.status(400).json({ ok: false, reason: 'friendUserId and roomCode required' });
+  const room = rooms.get(roomCode);
+  if (!room) return res.status(404).json({ ok: false, reason: 'Room not found' });
+  if (roomMode !== room.mode) return res.status(400).json({ ok: false, reason: 'Room mode mismatch' });
+  const pairKey = makeFriendPairKey(req.user.sub, friendUserId);
+  const link = await FriendLink.findOne({ pairKey }).lean();
+  if (!link) return res.status(403).json({ ok: false, reason: 'Can only invite added friends' });
+  emitToUser(friendUserId, 'friends:invite', {
+    fromUserId: req.user.sub,
+    fromUsername: req.user.username,
+    roomCode,
+    roomMode,
+  });
+  res.json({ ok: true });
+});
+
 // ════════════════════════════════════════════════
 //  SCORE ROUTES
 // ════════════════════════════════════════════════
@@ -493,11 +711,40 @@ function getNextSlot(room) {
   return -1;
 }
 
+function sanitizeRoomMode(mode) {
+  return String(mode || 'coop').toLowerCase() === 'pvp' ? 'pvp' : 'coop';
+}
+
+function sanitizeTeam(team) {
+  return String(team || 'team1').toLowerCase() === 'team2' ? 'team2' : 'team1';
+}
+
+function countTeams(room) {
+  let team1 = 0, team2 = 0;
+  room.players.forEach((p) => {
+    if (sanitizeTeam(p.team) === 'team2') team2++;
+    else team1++;
+  });
+  return { team1, team2 };
+}
+
+function roomPlayerPayload(p) {
+  return {
+    socketId: p.socketId,
+    name: p.name,
+    slot: p.slot,
+    ready: p.ready,
+    team: sanitizeTeam(p.team),
+  };
+}
+
 function roomSummary(room) {
   return {
     code:    room.code,
     state:   room.state,
-    players: [...room.players.values()].map(p => ({ socketId: p.socketId, name: p.name, slot: p.slot, ready: p.ready })),
+    mode:    sanitizeRoomMode(room.mode),
+    teams:   countTeams(room),
+    players: [...room.players.values()].map(roomPlayerPayload),
   };
 }
 
@@ -509,38 +756,87 @@ setInterval(() => {
 }, 5 * 60 * 1000);
 
 io.on('connection', socket => {
+  const authPayload = verifyToken(socket.handshake?.auth?.token || '');
+  socket.user = authPayload ? { userId: String(authPayload.sub), username: authPayload.username } : null;
+  if (socket.user?.userId) {
+    addOnlineSocket(socket.user.userId, socket.user.username, socket.id);
+    notifyFriendsPresence(socket.user.userId, true);
+  }
   console.log(`[+] ${socket.id} via ${socket.conn.transport.name} | rooms=${rooms.size}`);
 
-  socket.on('room:create', ({ name }, ack) => {
+  socket.on('room:create', ({ name, mode }, ack) => {
     const code = genRoomCode();
-    const room = { code, hostSocketId: socket.id, players: new Map(), state: 'lobby', levelOrder: [], createdAt: Date.now(), _stateSeq: 0 };
-    room.players.set(socket.id, { socketId: socket.id, name: name || 'HOST', slot: 0, ready: true, alive: true });
+    const roomMode = sanitizeRoomMode(mode);
+    const room = {
+      code,
+      hostSocketId: socket.id,
+      players: new Map(),
+      state: 'lobby',
+      mode: roomMode,
+      levelOrder: [],
+      createdAt: Date.now(),
+      _stateSeq: 0,
+    };
+    room.players.set(socket.id, {
+      socketId: socket.id,
+      name: name || 'HOST',
+      slot: 0,
+      ready: true,
+      alive: true,
+      team: 'team1',
+    });
     rooms.set(code, room);
     socket.join(code);
-    console.log(`[Room] Created ${code} by ${name}`);
+    console.log(`[Room] Created ${code} by ${name} (${roomMode})`);
     ack({ ok: true, code, slot: 0, summary: roomSummary(room) });
   });
 
-  socket.on('room:join', ({ code, name }, ack) => {
+  socket.on('room:join', ({ code, name, mode }, ack) => {
     const room = rooms.get(code?.toUpperCase());
     if (!room)                            return ack({ ok: false, reason: 'Room not found' });
     if (room.state !== 'lobby')           return ack({ ok: false, reason: 'Game already started' });
     if (room.players.size >= MAX_PLAYERS) return ack({ ok: false, reason: 'Room is full' });
+    const requestedMode = sanitizeRoomMode(mode || room.mode);
+    if (requestedMode !== sanitizeRoomMode(room.mode)) return ack({ ok: false, reason: 'Wrong room type' });
     const slot = getNextSlot(room);
-    room.players.set(socket.id, { socketId: socket.id, name: name || 'PLAYER', slot, ready: false, alive: true });
-    socket.join(code);
-    socket.to(code).emit('room:player_joined', { player: { socketId: socket.id, name: name || 'PLAYER', slot } });
+    const teams = countTeams(room);
+    const team = teams.team1 <= teams.team2 ? 'team1' : 'team2';
+    room.players.set(socket.id, { socketId: socket.id, name: name || 'PLAYER', slot, ready: false, alive: true, team });
+    socket.join(room.code);
+    socket.to(room.code).emit('room:player_joined', { player: { socketId: socket.id, name: name || 'PLAYER', slot, team } });
+    io.to(room.code).emit('room:summary', roomSummary(room));
     ack({ ok: true, code, slot, summary: roomSummary(room) });
   });
 
   socket.on('room:leave',  () => handleLeave(socket));
 
+  socket.on('room:team', ({ team }, ack) => {
+    const room = getRoomBySocket(socket.id);
+    const player = room?.players.get(socket.id);
+    if (!room || !player) return ack && ack({ ok: false, reason: 'Room not found' });
+    if (sanitizeRoomMode(room.mode) !== 'pvp') return ack && ack({ ok: false, reason: 'Not a PvP room' });
+    player.team = sanitizeTeam(team);
+    io.to(room.code).emit('room:summary', roomSummary(room));
+    ack && ack({ ok: true, summary: roomSummary(room) });
+  });
+
   socket.on('room:start', ({ levelOrder, mpOnlyMode, ropeEnabled }, ack) => {
     const room = getRoomBySocket(socket.id);
     if (!room || room.hostSocketId !== socket.id) return ack && ack({ ok: false });
+    if (sanitizeRoomMode(room.mode) === 'pvp') {
+      const teams = countTeams(room);
+      if (!teams.team1 || !teams.team2) {
+        return ack && ack({ ok: false, reason: 'Need at least one player on each team' });
+      }
+    }
     room.state = 'playing';
     room.levelOrder = levelOrder || [];
-    io.to(room.code).emit('game:start', { levelOrder: room.levelOrder, mpOnlyMode: mpOnlyMode || false, ropeEnabled: ropeEnabled !== false, summary: roomSummary(room) });
+    io.to(room.code).emit('game:start', {
+      levelOrder: room.levelOrder,
+      mpOnlyMode: mpOnlyMode || false,
+      ropeEnabled: ropeEnabled !== false,
+      summary: roomSummary(room)
+    });
     ack && ack({ ok: true });
   });
 
@@ -564,7 +860,12 @@ io.on('connection', socket => {
   socket.on('game:event',        (payload) => { const r = getRoomBySocket(socket.id); if (r) io.to(r.code).emit('game:event', { ...payload, fromSocketId: socket.id }); });
   socket.on('game:request_sync', ()        => { const r = getRoomBySocket(socket.id); if (r) io.to(r.hostSocketId).emit('game:client_needs_sync', { clientId: socket.id }); });
   socket.on('ping:req',          ({ ts })  => socket.emit('ping:res', { ts }));
-  socket.on('disconnect',        (reason)  => { console.log(`[-] ${socket.id}: ${reason}`); handleLeave(socket); });
+  socket.on('disconnect',        (reason)  => {
+    console.log(`[-] ${socket.id}: ${reason}`);
+    handleLeave(socket);
+    const removed = removeOnlineSocket(socket.id);
+    if (removed && !isUserOnline(removed.userId)) notifyFriendsPresence(removed.userId, false);
+  });
 });
 
 function handleLeave(socket) {
@@ -580,6 +881,7 @@ function handleLeave(socket) {
     room.hostSocketId = newHost.socketId;
     io.to(room.code).emit('room:new_host', { socketId: newHost.socketId, slot: newHost.slot });
   }
+  io.to(room.code).emit('room:summary', roomSummary(room));
   io.to(room.code).emit('room:player_left', { socketId: socket.id, slot: player.slot, name: player.name, summary: roomSummary(room) });
 }
 

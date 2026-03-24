@@ -189,7 +189,12 @@ function drawPlayer() {
     ctx.font = '7px monospace';
     ctx.fillStyle = PLAYER_COLORS[myPlayerIdx];
     ctx.textAlign = 'center';
-    ctx.fillText(playerName + ' (YOU)', x + PLAYER_W/2, y - 6);
+    const localTag = currentRoomMode === 'pvp' ? (myTeam === 'team2' ? 'T2 ' : 'T1 ') : '';
+    ctx.fillText(localTag + playerName + ' (YOU)', x + PLAYER_W/2, y - 6);
+    if (currentRoomMode === 'pvp') {
+      ctx.fillStyle = myTeam === 'team2' ? '#ff9b6b' : '#6bc5ff';
+      ctx.fillText(myTeam === 'team2' ? 'T2' : 'T1', x + PLAYER_W/2, y - 18);
+    }
     ctx.textAlign = 'left';
     ctx.restore();
   }

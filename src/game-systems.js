@@ -485,11 +485,18 @@ function drawRemotePlayer(rp, colorIdx, slot) {
     ctx.fillStyle = PLAYER_COLORS[colorIdx];
   }
 
-  ctx.fillText(rp.name, x + PLAYER_W/2, y - 6);
+  const teamLabel = currentRoomMode === 'pvp' ? (rp.team === 'team2' ? 'T2 ' : 'T1 ') : '';
+  ctx.fillText(teamLabel + rp.name, x + PLAYER_W/2, y - 6);
+
+  if (currentRoomMode === 'pvp') {
+    ctx.fillStyle = rp.team === 'team2' ? '#ff9b6b' : '#6bc5ff';
+    ctx.fillText(rp.team === 'team2' ? 'T2' : 'T1', x + PLAYER_W/2, y - 18);
+    ctx.fillStyle = PLAYER_COLORS[colorIdx];
+  }
 
   if (speaking) {
     ctx.fillStyle = '#00ff88';
-    ctx.fillText('🎙️', x + PLAYER_W/2, y - 18);
+    ctx.fillText('🎙️', x + PLAYER_W/2, y - (currentRoomMode === 'pvp' ? 30 : 18));
   }
 
   ctx.textAlign = 'left';

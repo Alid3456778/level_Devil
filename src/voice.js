@@ -251,12 +251,15 @@ function createVoiceTile(slot, name, stream, isMe) {
 
   const micEl    = document.createElement('div');
   micEl.className = 'vt-mic';
+  micEl.id = `vt-mic-${slot}`;
   if (isMe) {
     micEl.textContent = micEnabled ? '🎙️' : '🔇';
+    micEl.classList.add(micEnabled ? 'live' : 'off');
     micEl.onclick  = toggleMic;
     micEl.style.cursor = 'pointer';
   } else {
-    micEl.textContent = stream ? '🔊' : '○';
+    micEl.textContent = stream ? '🎧' : '🔇';
+    micEl.classList.add(stream ? 'idle' : 'off');
   }
 
   tile.appendChild(avatar);
@@ -285,8 +288,20 @@ function removeVoiceTile(slot) {
 function updateSpeakingIndicators() {
   [myPlayerIdx, ...remotePlayers.keys()].forEach(slot => {
     const av = document.getElementById(`vt-avatar-${slot}`);
+    const mic = document.getElementById(`vt-mic-${slot}`);
     if (!av) return;
-    av.classList.toggle('speaking', isSpeaking(slot));
+    const speaking = isSpeaking(slot);
+    av.classList.toggle('speaking', speaking);
+    if (!mic) return;
+    mic.classList.remove('live', 'idle', 'off');
+    if (slot === myPlayerIdx) {
+      mic.textContent = micEnabled ? (speaking ? '🗣️' : '🎙️') : '🔇';
+      mic.classList.add(micEnabled ? (speaking ? 'live' : 'idle') : 'off');
+      return;
+    }
+    const hasStream = remoteStreams.has(slot);
+    mic.textContent = !hasStream ? '🔇' : (speaking ? '🗣️' : '🎧');
+    mic.classList.add(!hasStream ? 'off' : (speaking ? 'live' : 'idle'));
   });
 }
 

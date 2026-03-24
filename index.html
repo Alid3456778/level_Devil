@@ -895,6 +895,10 @@
   .mode-card .icon  { font-size: clamp(22px,5vw,34px); margin-bottom: 8px; }
   .mode-card .label { font-size: clamp(8px,2vw,11px); color: var(--white); margin-bottom: 5px; }
   .mode-card .desc  { font-size: clamp(6px,1.5vw,8px); color: #666; line-height: 1.8; }
+  .mode-card.pvp:hover,.mode-card.pvp:active {
+    border-color: #66d4ff;
+    box-shadow: 0 6px 20px #66d4ff44;
+  }
 
   /* â”€â”€â”€ ROOM SCREEN â”€â”€â”€ */
   #roomScreen {
@@ -955,6 +959,12 @@
   }
   .room-status.ok  { color: #00ff88; }
   .room-status.err { color: var(--red); }
+  .room-mode-badge {
+    font-size: clamp(7px,1.7vw,8px);
+    color: #66d4ff;
+    text-align: center;
+    letter-spacing: 2px;
+  }
 
   /* â”€â”€â”€ LOBBY SCREEN â”€â”€â”€ */
   #lobbyScreen {
@@ -1020,8 +1030,68 @@
   .player-slot .p-color { width:12px; height:12px; border-radius:2px; flex-shrink:0; }
   .player-slot .p-name  { flex:1; color:var(--white); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .player-slot .p-host  { font-size:clamp(6px,1.5vw,7px); color:var(--yellow); }
+  .player-slot .p-team  { font-size:clamp(6px,1.5vw,7px); color:#66d4ff; }
   .player-slot .p-ready { font-size:clamp(6px,1.5vw,7px); color:#00ff88; }
   .player-slot.empty    { opacity:0.3; border-style:dashed; }
+  .pvp-team-picker {
+    display: none;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .pvp-team-btn {
+    background: #111;
+    border: 2px solid #2a2a4a;
+    color: #ccc;
+    font-family: inherit;
+    font-size: clamp(7px,1.7vw,8px);
+    padding: 8px 10px;
+    cursor: pointer;
+    min-height: 44px;
+  }
+  .pvp-team-btn.active {
+    border-color: #66d4ff;
+    color: #e8f8ff;
+    box-shadow: 0 0 10px #66d4ff33 inset;
+  }
+  .pvp-teams-wrap {
+    display: none;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .pvp-team-card {
+    background: #111;
+    border: 2px solid #2a2a4a;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 128px;
+  }
+  .pvp-team-card.team1 { border-color: #44aaff66; }
+  .pvp-team-card.team2 { border-color: #ff884466; }
+  .pvp-team-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: clamp(7px,1.7vw,8px);
+    color: #fff0c0;
+  }
+  .pvp-team-sub {
+    font-size: clamp(5px,1.2vw,6px);
+    color: #777;
+  }
+  .pvp-team-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .pvp-team-note {
+    display: none;
+    font-size: clamp(5px,1.2vw,6px);
+    color: #ffb84d;
+    line-height: 1.8;
+  }
 
   /* â”€â”€â”€ VOICE TILES (lobby + in-game) â”€â”€â”€ */
   #voicePanel {
@@ -1062,6 +1132,9 @@
     flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
   }
   .voice-tile .vt-mic { font-size: 9px; cursor: pointer; }
+  .voice-tile .vt-mic.live { color: #00ff88; }
+  .voice-tile .vt-mic.idle { color: #ffcc66; }
+  .voice-tile .vt-mic.off  { color: #777; }
 
   /* vc-btn kept for lobby compatibility */
   .vc-btn {
@@ -1115,10 +1188,131 @@
   @media (max-width: 600px) {
     .lobby-layout { flex-direction: column; }
     .lobby-right  { width: 100%; }
+    .pvp-teams-wrap,
+    .pvp-team-picker { grid-template-columns: 1fr; }
   }
   @media (max-width: 400px) {
     .room-panel { padding: 10px; }
     .btn { font-size: 8px; padding: 10px 14px; }
+  }
+
+  #friendsOverlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.84);
+    z-index: 220;
+    padding: 16px;
+  }
+  #friendsOverlay.open { display: flex; }
+  .friends-modal {
+    width: min(860px, 96vw);
+    max-height: 88vh;
+    overflow: auto;
+    background: #120f0c;
+    border: 3px solid #6f4a1f;
+    box-shadow: 0 0 0 2px rgba(255,190,90,0.08) inset;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .friends-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .friends-title {
+    font-size: clamp(9px,2vw,12px);
+    color: #ffd36a;
+  }
+  .friends-layout {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1fr;
+    gap: 10px;
+  }
+  .friends-panel {
+    background: #0f0d0a;
+    border: 2px solid #2e2418;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 150px;
+  }
+  .friends-panel h3 {
+    font-size: clamp(7px,1.8vw,9px);
+    color: #f0a830;
+  }
+  .friends-row {
+    display: flex;
+    gap: 8px;
+  }
+  .friends-row input {
+    flex: 1;
+    background: #111;
+    color: #fff4dd;
+    border: 2px solid #3b2b18;
+    font-family: inherit;
+    font-size: clamp(7px,1.6vw,8px);
+    padding: 8px 10px;
+    min-height: 42px;
+  }
+  .friends-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .friend-card {
+    background: #17130f;
+    border: 1px solid #3b2b18;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .friend-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: clamp(7px,1.6vw,8px);
+    color: #fff0c0;
+  }
+  .friend-status {
+    font-size: clamp(5px,1.1vw,6px);
+  }
+  .friend-status.online { color: #00ff88; }
+  .friend-status.offline { color: #666; }
+  .friend-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .friend-mini {
+    background: #111;
+    color: #f0a830;
+    border: 1px solid #7d4f16;
+    font-family: inherit;
+    font-size: clamp(5px,1.1vw,6px);
+    padding: 6px 8px;
+    cursor: pointer;
+  }
+  .friend-mini.accept { color: #00ff88; border-color: #00aa66; }
+  .friend-mini.reject { color: #ff8d72; border-color: #8b2d20; }
+  .friends-msg {
+    min-height: 14px;
+    font-size: clamp(6px,1.3vw,7px);
+    color: #888;
+  }
+  .friends-msg.ok { color: #00ff88; }
+  .friends-msg.err { color: #ff7d63; }
+  .friends-msg.info { color: #888; }
+  @media (max-width: 900px) {
+    .friends-layout { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -1236,6 +1430,7 @@
       <div id="modeGuestHint">Guests can play, but scores and feedback contact details are not saved.</div>
     </div>
     <div class="mode-account-actions">
+      <button class="mode-mini-btn" onclick="openFriendsOverlay()">PLAY WITH FRIENDS</button>
       <button class="mode-mini-btn" onclick="openFeedback()">FEEDBACK</button>
       <button class="mode-mini-btn danger" id="modeLogoutBtn" onclick="authLogout()" style="display:none;">LOGOUT</button>
     </div>
@@ -1250,6 +1445,11 @@
       <div class="icon">🌐</div>
       <div class="label">MULTIPLAYER</div>
       <div class="desc">Play with friends<br>Voice chat · 4 players</div>
+    </div>
+    <div class="mode-card pvp" onclick="goToPvpRoomScreen()">
+      <div class="icon">⚔️</div>
+      <div class="label">PVP</div>
+      <div class="desc">Teams and rivalry<br>T1 vs T2</div>
     </div>
   </div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:12px;">
@@ -1272,7 +1472,8 @@
 
 <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â• ROOM SCREEN â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
 <div id="roomScreen" class="screen">
-  <div class="title" style="font-size:clamp(13px,2.5vw,22px);color:var(--red);text-shadow:var(--glow);margin-bottom:8px;">MULTIPLAYER</div>
+  <div class="title" id="roomScreenTitle" style="font-size:clamp(13px,2.5vw,22px);color:var(--red);text-shadow:var(--glow);margin-bottom:8px;">MULTIPLAYER</div>
+  <div class="room-mode-badge" id="roomModeBadge">CO-OP ROOM</div>
   <div class="room-panels-wrap">
 
     <!-- Create Room -->
@@ -1316,6 +1517,23 @@
     <div class="lobby-left">
       <div class="lobby-panel">
         <h3>👥 PLAYERS (MAX 4)</h3>
+        <div class="pvp-team-picker" id="pvpTeamPicker">
+          <button class="pvp-team-btn" id="pvpTeamBtn1" onclick="setPvpTeam('team1')">JOIN T1</button>
+          <button class="pvp-team-btn" id="pvpTeamBtn2" onclick="setPvpTeam('team2')">JOIN T2</button>
+        </div>
+        <div class="pvp-team-note" id="pvpTeamNote">At least one player must be on the opposite team before the host can start.</div>
+        <div class="pvp-teams-wrap" id="pvpTeamsWrap">
+          <div class="pvp-team-card team1">
+            <div class="pvp-team-head"><span>TEAM 1</span><span id="team1Count">0</span></div>
+            <div class="pvp-team-sub">Tag above head: T1</div>
+            <div class="pvp-team-list" id="team1List"></div>
+          </div>
+          <div class="pvp-team-card team2">
+            <div class="pvp-team-head"><span>TEAM 2</span><span id="team2Count">0</span></div>
+            <div class="pvp-team-sub">Tag above head: T2</div>
+            <div class="pvp-team-list" id="team2List"></div>
+          </div>
+        </div>
         <div class="player-list" id="playerList"></div>
       </div>
       <div class="lobby-panel" style="flex:1;">
@@ -1350,6 +1568,8 @@
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:auto;">
+        <button class="btn btn-secondary" onclick="openFriendsOverlay()"
+                style="font-size:clamp(7px,2vw,8px);padding:8px;">👥 INVITE FRIENDS</button>
         <button class="btn" id="startGameBtn" onclick="hostStartGame()"
                 style="font-size:clamp(8px,2vw,9px);display:none;">▶ START GAME</button>
         <div id="waitingForHost"
@@ -1435,7 +1655,7 @@
   </div>
 </div>
 
-<script src="src/runtime.bundle.js?v=20260324-emoji-fix"></script>
+<script src="src/runtime.bundle.js?v=20260324-pvp-friends"></script>
 
 <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â• LEADERBOARD OVERLAY â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
 <div id="leaderboardOverlay">
@@ -1478,6 +1698,34 @@
       <div class="feedback-actions">
         <button class="btn btn-secondary" onclick="closeFeedback()">CANCEL</button>
         <button class="btn" onclick="submitFeedback()">SEND ▶</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="friendsOverlay" aria-hidden="true" onclick="if(event.target===this) closeFriendsOverlay()">
+  <div class="friends-modal">
+    <div class="friends-head">
+      <div class="friends-title">PLAY WITH FRIENDS</div>
+      <button class="feedback-close" onclick="closeFriendsOverlay()">✕ CLOSE</button>
+    </div>
+    <div class="friends-layout">
+      <div class="friends-panel">
+        <h3>ADD FRIEND</h3>
+        <div class="friends-row">
+          <input type="text" id="friendUsernameInput" maxlength="20" placeholder="USERNAME">
+          <button class="btn" style="font-size:clamp(7px,1.5vw,8px);padding:8px 12px;" onclick="sendFriendRequest()">SEND</button>
+        </div>
+        <div class="friends-msg info" id="friendsMsg">Send requests, accept invites, and jump into lobbies fast.</div>
+      </div>
+      <div class="friends-panel">
+        <h3>REQUESTS</h3>
+        <div class="friends-list" id="friendsIncomingList"></div>
+        <div class="friends-list" id="friendsOutgoingList"></div>
+      </div>
+      <div class="friends-panel">
+        <h3>FRIENDS</h3>
+        <div class="friends-list" id="friendsList"></div>
       </div>
     </div>
   </div>
