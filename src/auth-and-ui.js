@@ -363,7 +363,7 @@ function _renderLb(scores, body) {
     body.innerHTML = '<div class="lb-empty">NO SCORES YET.<br>BE THE FIRST TO FINISH A LEVEL!</div>';
     return;
   }
-  const medals = ['ðŸ¥‡', 'ðŸ¥ˆ', 'ðŸ¥‰'];
+  const medals = ['🥇', '🥈', '🥉'];
   let html = '';
   scores.forEach((s, i) => {
     const rank  = i + 1;
@@ -374,7 +374,7 @@ function _renderLb(scores, body) {
       <div class="lb-rank">${badge}</div>
       <div class="lb-name">${escHtml(s.username)}</div>
       <div class="lb-score">${(s.totalScore || 0).toLocaleString()}</div>
-      <div class="lb-deaths">${s.totalDeaths || 0}ðŸ’€</div>
+      <div class="lb-deaths">${s.totalDeaths || 0}💀</div>
       <div class="lb-time">${s.levelsPlayed || 0} LVL</div>
     </div>`;
   });

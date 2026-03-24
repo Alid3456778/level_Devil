@@ -293,7 +293,7 @@ function connectSocket(cb) {
 
   socket.on('disconnect', (reason) => {
     console.warn(`[Socket] Disconnected: ${reason} — multiMode=${multiMode}`);
-    if (multiMode) _setConnStatus('âš  Disconnected: ' + reason);
+    if (multiMode) _setConnStatus('⚠ Disconnected: ' + reason);
   });
 
   // â”€â”€ Room events â”€â”€
@@ -437,7 +437,7 @@ function connectSocket(cb) {
           const msg = data.msg || (p.name ? `${p.name} DIED!` : 'TEAMMATE DIED!');
           deathCount++;
           levelDeaths++;
-          document.getElementById('hudDeaths').textContent = `ðŸ’€ ${deathCount}`;
+          document.getElementById('hudDeaths').textContent = `💀 ${deathCount}`;
           shakeTimer = 20;
           gameState = 'dead';
           setTimeout(() => {
@@ -2461,7 +2461,7 @@ function drawRemotePlayer(rp, colorIdx, slot) {
   // Stack indicator: show "â†‘" above name if being stood on
   if (rp._headIndicator > 0) {
     ctx.fillStyle = '#ffd700';
-    ctx.fillText('ðŸ‘‘', x + PLAYER_W/2, y - 28);
+    ctx.fillText('👑', x + PLAYER_W/2, y - 28);
     ctx.fillStyle = PLAYER_COLORS[colorIdx];
   }
 
@@ -3145,7 +3145,7 @@ function _renderLb(scores, body) {
     body.innerHTML = '<div class="lb-empty">NO SCORES YET.<br>BE THE FIRST TO FINISH A LEVEL!</div>';
     return;
   }
-  const medals = ['ðŸ¥‡', 'ðŸ¥ˆ', 'ðŸ¥‰'];
+  const medals = ['🥇', '🥈', '🥉'];
   let html = '';
   scores.forEach((s, i) => {
     const rank  = i + 1;
@@ -3156,7 +3156,7 @@ function _renderLb(scores, body) {
       <div class="lb-rank">${badge}</div>
       <div class="lb-name">${escHtml(s.username)}</div>
       <div class="lb-score">${(s.totalScore || 0).toLocaleString()}</div>
-      <div class="lb-deaths">${s.totalDeaths || 0}ðŸ’€</div>
+      <div class="lb-deaths">${s.totalDeaths || 0}💀</div>
       <div class="lb-time">${s.levelsPlayed || 0} LVL</div>
     </div>`;
   });
@@ -5457,7 +5457,7 @@ function _showDoorWait(waiting) {
   // Flash a non-blocking status above the HUD
   const el = document.getElementById('hudTrap');
   if (el) {
-    el.textContent = `ðŸšª WAITING FOR ${waiting} PLAYER${waiting > 1 ? 'S' : ''}...`;
+    el.textContent = `🚪 WAITING FOR ${waiting} PLAYER${waiting > 1 ? 'S' : ''}...`;
     el.style.color = '#00ff88';
   }
 }
@@ -5586,7 +5586,7 @@ function levelClear() {
       btn.textContent = 'NEXT LEVEL ▶';
     }
     if (!isHost) {
-      document.getElementById('levelStats').innerHTML += '<br><br><span style="color:#ffcc00">â³ WAITING FOR HOST TO ADVANCE...</span>';
+      document.getElementById('levelStats').innerHTML += '<br><br><span style="color:#ffcc00">⏳ WAITING FOR HOST TO ADVANCE...</span>';
       console.log('[Client] Level clear â€” waiting for host level_load event');
     } else {
       console.log('[Host] Level clear ▶ showing NEXT button');
@@ -5941,7 +5941,7 @@ function drawTraps() {
             ctx.fillStyle = `rgba(255,150,50,${0.5 + pulse * 0.3})`;
             ctx.font = '10px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText('â–¼', t.x + t.w/2, t.y - 4);
+            ctx.fillText('▼', t.x + t.w/2, t.y - 4);
             ctx.textAlign = 'left';
           }
         }
@@ -6024,7 +6024,7 @@ function drawTraps() {
           ctx.fillStyle = 'rgba(255,200,0,0.7)';
           ctx.font = '11px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText(ang > 0 ? 'â†’' : 'â†', 0, sh2/2 + 14);
+          ctx.fillText(ang > 0 ? '→' : '←', 0, sh2/2 + 14);
           ctx.textAlign = 'left';
         }
         ctx.restore();
@@ -6207,7 +6207,7 @@ function drawTraps() {
         ctx.fillStyle = '#000';
         ctx.font = '14px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('â–²', t.x + t.w/2, t.y + bh/2 + 6);
+        ctx.fillText('▲', t.x + t.w/2, t.y + bh/2 + 6);
         break;
       }
 
@@ -6236,7 +6236,7 @@ function drawTraps() {
             ctx.fillStyle = '#ff4400';
             ctx.font = '10px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText('â–¼', t.x + (t.w||32)/2, t.y - 4);
+            ctx.fillText('▼', t.x + (t.w||32)/2, t.y - 4);
           }
         }
         break;
@@ -6322,7 +6322,7 @@ function drawTraps() {
         ctx.fillStyle = 'rgba(200,0,200,0.5)';
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('â†” CONTROLS FLIPPED', t.x + t.w/2, t.y + 20);
+        ctx.fillText('↔ CONTROLS FLIPPED', t.x + t.w/2, t.y + 20);
         break;
       }
 
@@ -6336,7 +6336,7 @@ function drawTraps() {
         ctx.fillStyle = '#aa44aa44';
         ctx.font = '8px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('â†’', t.x + (t.w||120)/2, t.y + (t.h||32)/2 + 4);
+        ctx.fillText('→', t.x + (t.w||120)/2, t.y + (t.h||32)/2 + 4);
         break;
       }
 
@@ -6400,7 +6400,7 @@ function drawTraps() {
           ctx.fillStyle = 'rgba(255,60,0,0.7)';
           ctx.font = '9px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText('âš ', t.x + t.w/2, t.y - 6);
+          ctx.fillText('⚠', t.x + t.w/2, t.y - 6);
           ctx.textAlign = 'left';
         }
         break;
@@ -6446,7 +6446,7 @@ function drawTraps() {
           ctx.fillStyle = 'rgba(255,100,0,0.6)';
           ctx.font = '14px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText('â–¼', t.x + t.w/2, t.y + t.h + 18);
+          ctx.fillText('▼', t.x + t.w/2, t.y + t.h + 18);
           ctx.textAlign = 'left';
         }
         break;
@@ -6509,7 +6509,7 @@ function drawTraps() {
           ctx.fillStyle = `rgba(255,150,50,${0.7 + pulse * 0.3})`;
           ctx.font = 'bold 14px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText('âš  CEILING DROPPING âš ', slab_x + slab_w/2, slab_y + slab_h + 24);
+          ctx.fillText('⚠ CEILING DROPPING ⚠', slab_x + slab_w/2, slab_y + slab_h + 24);
           ctx.textAlign = 'left';
         }
 

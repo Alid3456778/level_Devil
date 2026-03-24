@@ -70,7 +70,7 @@ function _showDoorWait(waiting) {
   // Flash a non-blocking status above the HUD
   const el = document.getElementById('hudTrap');
   if (el) {
-    el.textContent = `ðŸšª WAITING FOR ${waiting} PLAYER${waiting > 1 ? 'S' : ''}...`;
+    el.textContent = `🚪 WAITING FOR ${waiting} PLAYER${waiting > 1 ? 'S' : ''}...`;
     el.style.color = '#00ff88';
   }
 }
@@ -199,7 +199,7 @@ function levelClear() {
       btn.textContent = 'NEXT LEVEL ▶';
     }
     if (!isHost) {
-      document.getElementById('levelStats').innerHTML += '<br><br><span style="color:#ffcc00">â³ WAITING FOR HOST TO ADVANCE...</span>';
+      document.getElementById('levelStats').innerHTML += '<br><br><span style="color:#ffcc00">⏳ WAITING FOR HOST TO ADVANCE...</span>';
       console.log('[Client] Level clear â€” waiting for host level_load event');
     } else {
       console.log('[Host] Level clear ▶ showing NEXT button');

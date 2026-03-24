@@ -103,7 +103,7 @@
             ctx.fillStyle = `rgba(255,150,50,${0.5 + pulse * 0.3})`;
             ctx.font = '10px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText('â–¼', t.x + t.w/2, t.y - 4);
+            ctx.fillText('▼', t.x + t.w/2, t.y - 4);
             ctx.textAlign = 'left';
           }
         }
@@ -186,7 +186,7 @@
           ctx.fillStyle = 'rgba(255,200,0,0.7)';
           ctx.font = '11px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText(ang > 0 ? 'â†’' : 'â†', 0, sh2/2 + 14);
+          ctx.fillText(ang > 0 ? '→' : '←', 0, sh2/2 + 14);
           ctx.textAlign = 'left';
         }
         ctx.restore();
@@ -369,7 +369,7 @@
         ctx.fillStyle = '#000';
         ctx.font = '14px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('â–²', t.x + t.w/2, t.y + bh/2 + 6);
+        ctx.fillText('▲', t.x + t.w/2, t.y + bh/2 + 6);
         break;
       }
 
@@ -398,7 +398,7 @@
             ctx.fillStyle = '#ff4400';
             ctx.font = '10px monospace';
             ctx.textAlign = 'center';
-            ctx.fillText('â–¼', t.x + (t.w||32)/2, t.y - 4);
+            ctx.fillText('▼', t.x + (t.w||32)/2, t.y - 4);
           }
         }
         break;
@@ -484,7 +484,7 @@
         ctx.fillStyle = 'rgba(200,0,200,0.5)';
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('â†” CONTROLS FLIPPED', t.x + t.w/2, t.y + 20);
+        ctx.fillText('↔ CONTROLS FLIPPED', t.x + t.w/2, t.y + 20);
         break;
       }
 
@@ -498,7 +498,7 @@
         ctx.fillStyle = '#aa44aa44';
         ctx.font = '8px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('â†’', t.x + (t.w||120)/2, t.y + (t.h||32)/2 + 4);
+        ctx.fillText('→', t.x + (t.w||120)/2, t.y + (t.h||32)/2 + 4);
         break;
       }
 
@@ -562,7 +562,7 @@
           ctx.fillStyle = 'rgba(255,60,0,0.7)';
           ctx.font = '9px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText('âš ', t.x + t.w/2, t.y - 6);
+          ctx.fillText('⚠', t.x + t.w/2, t.y - 6);
           ctx.textAlign = 'left';
         }
         break;
@@ -608,7 +608,7 @@
           ctx.fillStyle = 'rgba(255,100,0,0.6)';
           ctx.font = '14px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText('â–¼', t.x + t.w/2, t.y + t.h + 18);
+          ctx.fillText('▼', t.x + t.w/2, t.y + t.h + 18);
           ctx.textAlign = 'left';
         }
         break;
@@ -671,7 +671,7 @@
           ctx.fillStyle = `rgba(255,150,50,${0.7 + pulse * 0.3})`;
           ctx.font = 'bold 14px monospace';
           ctx.textAlign = 'center';
-          ctx.fillText('âš  CEILING DROPPING âš ', slab_x + slab_w/2, slab_y + slab_h + 24);
+          ctx.fillText('⚠ CEILING DROPPING ⚠', slab_x + slab_w/2, slab_y + slab_h + 24);
           ctx.textAlign = 'left';
         }
 

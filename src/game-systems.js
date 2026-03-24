@@ -481,7 +481,7 @@ function drawRemotePlayer(rp, colorIdx, slot) {
   // Stack indicator: show "â†‘" above name if being stood on
   if (rp._headIndicator > 0) {
     ctx.fillStyle = '#ffd700';
-    ctx.fillText('ðŸ‘‘', x + PLAYER_W/2, y - 28);
+    ctx.fillText('👑', x + PLAYER_W/2, y - 28);
     ctx.fillStyle = PLAYER_COLORS[colorIdx];
   }
 

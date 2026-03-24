@@ -184,7 +184,7 @@ function connectSocket(cb) {
 
   socket.on('disconnect', (reason) => {
     console.warn(`[Socket] Disconnected: ${reason} — multiMode=${multiMode}`);
-    if (multiMode) _setConnStatus('âš  Disconnected: ' + reason);
+    if (multiMode) _setConnStatus('⚠ Disconnected: ' + reason);
   });
 
   // â”€â”€ Room events â”€â”€
@@ -328,7 +328,7 @@ function connectSocket(cb) {
           const msg = data.msg || (p.name ? `${p.name} DIED!` : 'TEAMMATE DIED!');
           deathCount++;
           levelDeaths++;
-          document.getElementById('hudDeaths').textContent = `ðŸ’€ ${deathCount}`;
+          document.getElementById('hudDeaths').textContent = `💀 ${deathCount}`;
           shakeTimer = 20;
           gameState = 'dead';
           setTimeout(() => {
