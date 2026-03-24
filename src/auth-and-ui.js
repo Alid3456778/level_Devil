@@ -107,7 +107,16 @@ async function authRegister() {
 }
 
 function authSkipToGuest() {
-  const u = (document.getElementById('liUsername')?.value || '').trim() || 'GUEST';
+  const loginName = (document.getElementById('liUsername')?.value || '').trim();
+  const registerName = (document.getElementById('regUsername')?.value || '').trim();
+  const u = loginName || registerName;
+  const activeMsg = document.getElementById(
+    document.getElementById('authLogin')?.style.display === 'none' ? 'regMsg' : 'liMsg'
+  );
+  if (!u) {
+    _authMsg(activeMsg, 'ENTER YOUR NAME TO PLAY AS GUEST', 'err');
+    return;
+  }
   playerName = u;
   refreshModeAccountUI();
   _dismissNsTooltip();
