@@ -618,6 +618,11 @@ function escHtml(str) {
 }
 
 function nsToggleFullscreen() {
+  const syncNsButtons = (text) => {
+    document.querySelectorAll('#nsFullscreenBtn').forEach((btn) => {
+      btn.textContent = text;
+    });
+  };
   const el = document.documentElement;
   if (!document.fullscreenElement && !document.webkitFullscreenElement) {
     const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
@@ -625,14 +630,12 @@ function nsToggleFullscreen() {
     if (screen.orientation && screen.orientation.lock) {
       screen.orientation.lock('landscape').catch(() => {});
     }
-    const btn = document.getElementById('nsFullscreenBtn');
-    if (btn) btn.textContent = '✕';
+    syncNsButtons('✕');
     _dismissNsTooltip();
   } else {
     const ex = document.exitFullscreen || document.webkitExitFullscreen;
     if (ex) ex.call(document).catch(() => {});
-    const btn = document.getElementById('nsFullscreenBtn');
-    if (btn) btn.textContent = '⛶';
+    syncNsButtons('⛶');
   }
 }
 

@@ -152,6 +152,7 @@ const remotePlayers = new Map();
 let pingInterval = null;
 let myPing = 0;
 let _pingSentAt = 0;
+let _lastTelemetrySent = 0;
 
 // â”€â”€â”€ MEDIA (Voice â€” WebRTC audio only) â”€â”€â”€â”€â”€â”€â”€
 let localStream      = null;
@@ -625,6 +626,16 @@ function connectSocket(cb) {
     myPing = Date.now() - ts;
     _updateLagTier(myPing); // adaptive compensation update
     updatePingDisplay();
+    const now = Date.now();
+    if (socket && socket.connected && now - _lastTelemetrySent > 5000) {
+      _lastTelemetrySent = now;
+      socket.emit('telemetry:net', {
+        pingMs: myPing,
+        lagTier: _lagTier,
+        connMode: _getConnectionMode(),
+        isHost,
+      });
+    }
   });
 
   socket.on('friends:request', (payload) => {
@@ -3609,6 +3620,11 @@ function escHtml(str) {
 }
 
 function nsToggleFullscreen() {
+  const syncNsButtons = (text) => {
+    document.querySelectorAll('#nsFullscreenBtn').forEach((btn) => {
+      btn.textContent = text;
+    });
+  };
   const el = document.documentElement;
   if (!document.fullscreenElement && !document.webkitFullscreenElement) {
     const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
@@ -3616,14 +3632,12 @@ function nsToggleFullscreen() {
     if (screen.orientation && screen.orientation.lock) {
       screen.orientation.lock('landscape').catch(() => {});
     }
-    const btn = document.getElementById('nsFullscreenBtn');
-    if (btn) btn.textContent = '✕';
+    syncNsButtons('✕');
     _dismissNsTooltip();
   } else {
     const ex = document.exitFullscreen || document.webkitExitFullscreen;
     if (ex) ex.call(document).catch(() => {});
-    const btn = document.getElementById('nsFullscreenBtn');
-    if (btn) btn.textContent = '⛶';
+    syncNsButtons('⛶');
   }
 }
 

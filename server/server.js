@@ -37,6 +37,97 @@ const MAX_PLAYERS    = 4;
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SELF_PING_URL  = process.env.RENDER_EXTERNAL_URL || null;
 
+const METRICS_SAMPLE_LIMIT = 250;
+
+const serverMetrics = {
+  startedAt: Date.now(),
+  socketsConnectedTotal: 0,
+  socketsDisconnectedTotal: 0,
+  activeSockets: 0,
+  peakActiveSockets: 0,
+  roomCreates: 0,
+  roomJoins: 0,
+  roomStarts: 0,
+  roomLeaves: 0,
+  gameStateRelays: 0,
+  gameInputRelays: 0,
+  gameEventRelays: 0,
+  syncRequests: 0,
+  pingRequests: 0,
+  voiceSignals: 0,
+  p2pSignals: 0,
+  gameStateBytes: 0,
+  gameInputBytes: 0,
+  lastRoomCreateAt: null,
+  lastRoomJoinAt: null,
+  lastRoomStartAt: null,
+  latencyReports: [],
+};
+
+function trackMetricBytes(field, payload) {
+  try {
+    serverMetrics[field] += Buffer.byteLength(JSON.stringify(payload || {}), 'utf8');
+  } catch {}
+}
+
+function addLatencyReport(report) {
+  serverMetrics.latencyReports.push({ ...report, ts: Date.now() });
+  if (serverMetrics.latencyReports.length > METRICS_SAMPLE_LIMIT) {
+    serverMetrics.latencyReports.shift();
+  }
+}
+
+function summarizeLatencyReports() {
+  const reports = serverMetrics.latencyReports;
+  if (!reports.length) {
+    return {
+      count: 0,
+      avgPingMs: 0,
+      maxPingMs: 0,
+      byTier: { great: 0, good: 0, high: 0, bad: 0 },
+      byConnMode: { relay: 0, hybrid: 0, p2p: 0, solo: 0, unknown: 0 },
+      recent: [],
+    };
+  }
+
+  const byTier = { great: 0, good: 0, high: 0, bad: 0 };
+  const byConnMode = { relay: 0, hybrid: 0, p2p: 0, solo: 0, unknown: 0 };
+  let totalPing = 0;
+  let maxPing = 0;
+  reports.forEach((r) => {
+    totalPing += Number(r.pingMs || 0);
+    maxPing = Math.max(maxPing, Number(r.pingMs || 0));
+    const tier = ['great', 'good', 'high', 'bad'][Number(r.lagTier)] || 'unknown';
+    if (byTier[tier] !== undefined) byTier[tier]++;
+    const mode = ['relay', 'hybrid', 'p2p', 'solo'].includes(r.connMode) ? r.connMode : 'unknown';
+    byConnMode[mode]++;
+  });
+
+  return {
+    count: reports.length,
+    avgPingMs: Math.round(totalPing / reports.length),
+    maxPingMs: maxPing,
+    byTier,
+    byConnMode,
+    recent: reports.slice(-12),
+  };
+}
+
+function roomMetricsSummary() {
+  const summary = [];
+  rooms.forEach((room) => {
+    summary.push({
+      code: room.code,
+      mode: room.mode,
+      state: room.state,
+      players: room.players.size,
+      stateSeq: room._stateSeq || 0,
+      ageSec: Math.floor((Date.now() - room.createdAt) / 1000),
+    });
+  });
+  return summary;
+}
+
 // ─── SCORING CONSTANTS ────────────────────────
 // Score = BASE - death_penalty - time_penalty
 // death_penalty: 0 deaths=0, 1=50, 2=100, 3=180, 4=280, 5=400, 6=540, 7+=700
@@ -675,6 +766,45 @@ app.get('/health', (_, res) => {
   });
 });
 
+app.get('/health/metrics', (_, res) => {
+  res.json({
+    ok: true,
+    db: dbConnected,
+    uptimeSec: Math.floor(process.uptime()),
+    memMb: Math.floor(process.memoryUsage().heapUsed / 1024 / 1024),
+    sockets: {
+      active: serverMetrics.activeSockets,
+      peak: serverMetrics.peakActiveSockets,
+      connectedTotal: serverMetrics.socketsConnectedTotal,
+      disconnectedTotal: serverMetrics.socketsDisconnectedTotal,
+    },
+    rooms: {
+      active: rooms.size,
+      players: totalPlayers(),
+      details: roomMetricsSummary(),
+    },
+    relay: {
+      roomCreates: serverMetrics.roomCreates,
+      roomJoins: serverMetrics.roomJoins,
+      roomStarts: serverMetrics.roomStarts,
+      roomLeaves: serverMetrics.roomLeaves,
+      gameStateRelays: serverMetrics.gameStateRelays,
+      gameInputRelays: serverMetrics.gameInputRelays,
+      gameEventRelays: serverMetrics.gameEventRelays,
+      syncRequests: serverMetrics.syncRequests,
+      pingRequests: serverMetrics.pingRequests,
+      voiceSignals: serverMetrics.voiceSignals,
+      p2pSignals: serverMetrics.p2pSignals,
+      avgGameStateBytes: serverMetrics.gameStateRelays ? Math.round(serverMetrics.gameStateBytes / serverMetrics.gameStateRelays) : 0,
+      avgGameInputBytes: serverMetrics.gameInputRelays ? Math.round(serverMetrics.gameInputBytes / serverMetrics.gameInputRelays) : 0,
+      lastRoomCreateAt: serverMetrics.lastRoomCreateAt,
+      lastRoomJoinAt: serverMetrics.lastRoomJoinAt,
+      lastRoomStartAt: serverMetrics.lastRoomStartAt,
+    },
+    clientLatency: summarizeLatencyReports(),
+  });
+});
+
 // ─── SELF-PING KEEP-ALIVE ────────────────────
 if (SELF_PING_URL) {
   const keepAliveUrl = SELF_PING_URL + '/health';
@@ -762,6 +892,9 @@ io.on('connection', socket => {
     addOnlineSocket(socket.user.userId, socket.user.username, socket.id);
     notifyFriendsPresence(socket.user.userId, true);
   }
+  serverMetrics.socketsConnectedTotal++;
+  serverMetrics.activeSockets++;
+  serverMetrics.peakActiveSockets = Math.max(serverMetrics.peakActiveSockets, serverMetrics.activeSockets);
   console.log(`[+] ${socket.id} via ${socket.conn.transport.name} | rooms=${rooms.size}`);
 
   socket.on('room:create', ({ name, mode }, ack) => {
@@ -787,6 +920,8 @@ io.on('connection', socket => {
     });
     rooms.set(code, room);
     socket.join(code);
+    serverMetrics.roomCreates++;
+    serverMetrics.lastRoomCreateAt = new Date().toISOString();
     console.log(`[Room] Created ${code} by ${name} (${roomMode})`);
     ack({ ok: true, code, slot: 0, summary: roomSummary(room) });
   });
@@ -803,6 +938,8 @@ io.on('connection', socket => {
     const team = teams.team1 <= teams.team2 ? 'team1' : 'team2';
     room.players.set(socket.id, { socketId: socket.id, name: name || 'PLAYER', slot, ready: false, alive: true, team });
     socket.join(room.code);
+    serverMetrics.roomJoins++;
+    serverMetrics.lastRoomJoinAt = new Date().toISOString();
     socket.to(room.code).emit('room:player_joined', { player: { socketId: socket.id, name: name || 'PLAYER', slot, team } });
     io.to(room.code).emit('room:summary', roomSummary(room));
     ack({ ok: true, code, slot, summary: roomSummary(room) });
@@ -831,6 +968,8 @@ io.on('connection', socket => {
     }
     room.state = 'playing';
     room.levelOrder = levelOrder || [];
+    serverMetrics.roomStarts++;
+    serverMetrics.lastRoomStartAt = new Date().toISOString();
     io.to(room.code).emit('game:start', {
       levelOrder: room.levelOrder,
       mpOnlyMode: mpOnlyMode || false,
@@ -840,29 +979,67 @@ io.on('connection', socket => {
     ack && ack({ ok: true });
   });
 
-  socket.on('voice:offer',  ({ to, offer })     => io.to(to).emit('voice:offer',  { from: socket.id, offer }));
-  socket.on('voice:answer', ({ to, answer })    => io.to(to).emit('voice:answer', { from: socket.id, answer }));
-  socket.on('voice:ice',    ({ to, candidate }) => io.to(to).emit('voice:ice',    { from: socket.id, candidate }));
-  socket.on('p2p:offer',   ({ to, offer })      => io.to(to).emit('p2p:offer',   { from: socket.id, offer }));
-  socket.on('p2p:answer',  ({ to, answer })     => io.to(to).emit('p2p:answer',  { from: socket.id, answer }));
-  socket.on('p2p:ice',     ({ to, candidate })  => io.to(to).emit('p2p:ice',     { from: socket.id, candidate }));
+  socket.on('voice:offer',  ({ to, offer })     => { serverMetrics.voiceSignals++; io.to(to).emit('voice:offer',  { from: socket.id, offer }); });
+  socket.on('voice:answer', ({ to, answer })    => { serverMetrics.voiceSignals++; io.to(to).emit('voice:answer', { from: socket.id, answer }); });
+  socket.on('voice:ice',    ({ to, candidate }) => { serverMetrics.voiceSignals++; io.to(to).emit('voice:ice',    { from: socket.id, candidate }); });
+  socket.on('p2p:offer',   ({ to, offer })      => { serverMetrics.p2pSignals++; io.to(to).emit('p2p:offer',   { from: socket.id, offer }); });
+  socket.on('p2p:answer',  ({ to, answer })     => { serverMetrics.p2pSignals++; io.to(to).emit('p2p:answer',  { from: socket.id, answer }); });
+  socket.on('p2p:ice',     ({ to, candidate })  => { serverMetrics.p2pSignals++; io.to(to).emit('p2p:ice',     { from: socket.id, candidate }); });
 
   let _relayCount = 0;
   socket.on('game:state', (payload) => {
     const room = getRoomBySocket(socket.id);
     if (!room || room.hostSocketId !== socket.id) return;
     room._stateSeq = (room._stateSeq + 1) & 0xFFFF;
+    serverMetrics.gameStateRelays++;
+    trackMetricBytes('gameStateBytes', payload);
     socket.to(room.code).emit('game:state', { ...payload, _seq: room._stateSeq });
     if (++_relayCount % 150 === 0) console.log(`[Relay] ${room.code} seq=${room._stateSeq}`);
   });
 
-  socket.on('game:input',        (payload) => { const r = getRoomBySocket(socket.id); if (r) io.to(r.hostSocketId).emit('game:input', { ...payload, fromSocketId: socket.id }); });
-  socket.on('game:event',        (payload) => { const r = getRoomBySocket(socket.id); if (r) io.to(r.code).emit('game:event', { ...payload, fromSocketId: socket.id }); });
-  socket.on('game:request_sync', ()        => { const r = getRoomBySocket(socket.id); if (r) io.to(r.hostSocketId).emit('game:client_needs_sync', { clientId: socket.id }); });
-  socket.on('ping:req',          ({ ts })  => socket.emit('ping:res', { ts }));
+  socket.on('game:input',        (payload) => {
+    const r = getRoomBySocket(socket.id);
+    if (r) {
+      serverMetrics.gameInputRelays++;
+      trackMetricBytes('gameInputBytes', payload);
+      io.to(r.hostSocketId).emit('game:input', { ...payload, fromSocketId: socket.id });
+    }
+  });
+  socket.on('game:event',        (payload) => {
+    const r = getRoomBySocket(socket.id);
+    if (r) {
+      serverMetrics.gameEventRelays++;
+      io.to(r.code).emit('game:event', { ...payload, fromSocketId: socket.id });
+    }
+  });
+  socket.on('game:request_sync', ()        => {
+    const r = getRoomBySocket(socket.id);
+    if (r) {
+      serverMetrics.syncRequests++;
+      io.to(r.hostSocketId).emit('game:client_needs_sync', { clientId: socket.id });
+    }
+  });
+  socket.on('ping:req',          ({ ts })  => {
+    serverMetrics.pingRequests++;
+    socket.emit('ping:res', { ts });
+  });
+  socket.on('telemetry:net',     (payload) => {
+    const room = getRoomBySocket(socket.id);
+    addLatencyReport({
+      socketId: socket.id,
+      roomCode: room?.code || null,
+      username: socket.user?.username || null,
+      pingMs: Number(payload?.pingMs || 0),
+      lagTier: Number(payload?.lagTier ?? -1),
+      connMode: String(payload?.connMode || 'unknown'),
+      role: payload?.isHost ? 'host' : 'client',
+    });
+  });
   socket.on('disconnect',        (reason)  => {
     console.log(`[-] ${socket.id}: ${reason}`);
     handleLeave(socket);
+    serverMetrics.socketsDisconnectedTotal++;
+    serverMetrics.activeSockets = Math.max(0, serverMetrics.activeSockets - 1);
     const removed = removeOnlineSocket(socket.id);
     if (removed && !isUserOnline(removed.userId)) notifyFriendsPresence(removed.userId, false);
   });
@@ -875,6 +1052,7 @@ function handleLeave(socket) {
   if (!player) return;
   room.players.delete(socket.id);
   socket.leave(room.code);
+  serverMetrics.roomLeaves++;
   if (room.players.size === 0) { rooms.delete(room.code); return; }
   if (room.hostSocketId === socket.id) {
     const newHost = [...room.players.values()].sort((a,b) => a.slot - b.slot)[0];
