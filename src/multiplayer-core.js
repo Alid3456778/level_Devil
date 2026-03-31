@@ -61,6 +61,7 @@ const ROPE_SNAP_LEN = 280;
 let stateTickAccum  = 0;
 const STATE_TICK_MS = 22; // ~45 Hz â€” more frequent = less client drift
 let lastInputSent   = 0;
+let lastInputFallbackSent = 0;
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //  ADAPTIVE LAG COMPENSATION SYSTEM
@@ -959,19 +960,15 @@ function updateRoomScreenModeUI() {
   if (joinStatus) joinStatus.textContent = isPvp ? 'Enter a PvP room code to join' : 'Enter a room code to join';
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //  PHASE 3 â€” GAME STATE SYNC
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Cache of last broadcast for delta comparison
 let _lastBroadcast = null;
 let _fullSyncRequested = false;
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 //  WEBRTC P2P DATA CHANNELS
 //  Game state travels Hostâ†’Client directly.
 //  Server is only used for WebRTC signaling (tiny messages).
 //  This eliminates server relay latency completely.
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const _rtcPeers   = new Map(); // socketId â†’ RTCPeerConnection
 const _rtcChannels= new Map(); // socketId â†’ RTCDataChannel (send side, host only)
 const _rtcReady   = new Map(); // socketId â†’ boolean (channel open)
@@ -1013,6 +1010,30 @@ function _p2pSend(socketId, data) {
     catch(e) {}
   }
   return false; // fell through â€” caller uses socket relay instead
+}
+
+function _handleP2PGameMessage(fromSocketId, msg) {
+  if (!msg || typeof msg !== 'object') return;
+  switch (msg._type) {
+    case 'game:state':
+      if (!isHost) applyGameState(msg);
+      break;
+    case 'game:event':
+      _handleGameEvent(msg);
+      break;
+    case 'game:input': {
+      if (!isHost) break;
+      const p = [...players.values()].find(x => x.socketId === fromSocketId);
+      if (p) applyRemoteInput(p.slot, msg);
+      break;
+    }
+    case 'game:request_sync':
+      if (isHost) {
+        _fullSyncRequested = true;
+        _lastBroadcast = null;
+      }
+      break;
+  }
 }
 
 // Send game state to ALL clients â€” P2P first, socket relay as fallback
@@ -1061,6 +1082,9 @@ async function _p2pCreateOffer(clientSocketId) {
     console.warn(`[P2P] DataChannel CLOSED for ${clientSocketId}`);
   };
   ch.onerror = (e) => console.error(`[P2P] DataChannel ERROR for ${clientSocketId}:`, e);
+  ch.onmessage = ({ data }) => {
+    try { _handleP2PGameMessage(clientSocketId, JSON.parse(data)); } catch(e) {}
+  };
 
   pc.onconnectionstatechange = () => {
     console.log(`[P2P] Connection state → ${clientSocketId}: ${pc.connectionState}`);
@@ -1090,25 +1114,19 @@ async function _p2pHandleOffer(fromSocketId, offer) {
 
   // Client receives data on this channel
   pc.ondatachannel = ({ channel }) => {
+    _rtcChannels.set(fromSocketId, channel);
     channel.onmessage = ({ data }) => {
-      try {
-        const msg = JSON.parse(data);
-        // Route message type â€” same as socket handlers
-        if (msg._type === 'game:state') {
-          applyGameState(msg);
-        } else if (msg._type === 'game:event') {
-          _handleGameEvent(msg);
-        }
-      } catch(e) {}
+      try { _handleP2PGameMessage(fromSocketId, JSON.parse(data)); } catch(e) {}
     };
     channel.onopen  = () => {
       _rtcReady.set(fromSocketId, true);
       console.log(`[P2P] ✓ DataChannel OPEN ← from host ${fromSocketId}`);
       _resetRemoteStateBuffers();
-      if (socket) socket.emit('game:request_sync');
+      if (!_p2pSend(fromSocketId, { _type: 'game:request_sync' }) && socket) socket.emit('game:request_sync');
     };
     channel.onclose = () => {
       _rtcReady.set(fromSocketId, false);
+      _rtcChannels.delete(fromSocketId);
       console.warn(`[P2P] DataChannel CLOSED from host ${fromSocketId}`);
     };
     channel.onerror = (e) => console.error('[P2P] Client channel error:', e);
@@ -1228,6 +1246,7 @@ function broadcastGameState() {
     _lastBroadcast.platCache[i] = { state: p.state, y: p.y };
   });
 
+  const forceSocketBackup = _fullSyncRequested;
   _fullSyncRequested = false;
 
   const state = {
@@ -1244,8 +1263,11 @@ function broadcastGameState() {
   // Dual-path broadcast: P2P (fast, direct) + socket relay (reliable fallback)
   // Always send via socket so clients without P2P still get state.
   // P2P clients also receive via socket but deduplicate by _seq.
-  _p2pBroadcast({ ...state, _type: 'game:state' });
-  socket.emit('game:state', state);
+  const allP2P = _p2pBroadcast({ ...state, _type: 'game:state' });
+  const needsSocketRelay = !allP2P || forceSocketBackup || (_broadcastCount % 24 === 0);
+  if (needsSocketRelay) {
+    socket.emit('game:state', state);
+  }
   _broadcastCount++;
 
   // Periodic connection log (~every 5s at 30Hz)
@@ -1296,10 +1318,12 @@ function lerpTrapPositions() {
 }
 
 function buildAllPlayerStates() {
+  const qPos = (v) => Math.round(v * 10) / 10;
+  const qVel = (v) => Math.round(v * 100) / 100;
   const states = [{
     slot: myPlayerIdx,
-    x: player.x, y: player.y,
-    vx: player.vx, vy: player.vy,
+    x: qPos(player.x), y: qPos(player.y),
+    vx: qVel(player.vx), vy: qVel(player.vy),
     facing: player.facing,
     gravityFlipped: player.gravityFlipped,
     alive: player.alive,
@@ -1309,10 +1333,10 @@ function buildAllPlayerStates() {
   remotePlayers.forEach((rp, slot) => states.push({
     slot,
     ...rp,
-    x:  rp.logicX  ?? rp.x,
-    y:  rp.logicY  ?? rp.y,
-    vx: rp.logicVx ?? rp.vx,
-    vy: rp.logicVy ?? rp.vy,
+    x:  qPos(rp.logicX  ?? rp.x),
+    y:  qPos(rp.logicY  ?? rp.y),
+    vx: qVel(rp.logicVx ?? rp.vx),
+    vy: qVel(rp.logicVy ?? rp.vy),
   }));
   return states;
 }
@@ -1469,7 +1493,8 @@ function sendInputToHost() {
   lastInputSent = now;
   _lastInputState = { left, right, jump };
 
-  socket.emit('game:input', {
+  const payload = {
+    _type: 'game:input',
     left, right, jump,
     x:  Math.round(player.x * 10) / 10,
     y:  Math.round(player.y * 10) / 10,
@@ -1480,7 +1505,13 @@ function sendInputToHost() {
     gravityFlipped: player.gravityFlipped,
     animFrame: player.animFrame,
     ts: now, // for host-side latency compensation
-  });
+  };
+
+  const sentP2P = _p2pSend([..._rtcChannels.keys()][0], payload);
+  if (!sentP2P || (now - lastInputFallbackSent) > 200) {
+    socket.emit('game:input', payload);
+    lastInputFallbackSent = now;
+  }
 }
 
 function applyRemoteInput(slot, msg) {
@@ -1492,10 +1523,11 @@ function applyRemoteInput(slot, msg) {
   const dx = Math.abs((existing.x || 0) - msg.x);
   const dy = Math.abs((existing.y || 0) - msg.y);
   const hardSnap = dx > 64 || dy > 64 || !existing.x;
+  const blend = isHost ? 0.72 : 0.4;
   remotePlayers.set(slot, {
     ...existing,
-    x:  hardSnap ? msg.x : existing.x + (msg.x - existing.x) * 0.4,
-    y:  hardSnap ? msg.y : existing.y + (msg.y - existing.y) * 0.4,
+    x:  hardSnap ? msg.x : existing.x + (msg.x - existing.x) * blend,
+    y:  hardSnap ? msg.y : existing.y + (msg.y - existing.y) * blend,
     prevLogicX,
     prevLogicY,
     logicX: msg.x,
