@@ -30,12 +30,26 @@ const jwt         = require('jsonwebtoken');
 
 // ─── CONFIG ──────────────────────────────────
 const PORT           = process.env.PORT        || 3000;
-const MONGO_URI      = process.env.MONGODB_URI || 'mongodb+srv://sunbreathing13form:Pimse123@cluster0.ny9by.mongodb.net/leveldevil';
+const MONGO_URI      = process.env.MONGODB_URI || '';
 const JWT_SECRET     = process.env.JWT_SECRET  || 'level_devil_jwt_secret_change_me';
 const JWT_EXPIRES    = '30d';   // stay logged in for 30 days
 const MAX_PLAYERS    = 4;
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const SELF_PING_URL  = process.env.RENDER_EXTERNAL_URL || null;
+// const SELF_PING_URL  = process.env.RENDER_EXTERNAL_URL || null;
+const METRICS_KEY    = process.env.METRICS_KEY || '';
+const HTTP_RATE_WINDOW_MS = Number(process.env.HTTP_RATE_WINDOW_MS || 60_000);
+const HTTP_RATE_LIMIT_DEFAULT = Number(process.env.HTTP_RATE_LIMIT_DEFAULT || 120);
+const HTTP_RATE_LIMIT_AUTH = Number(process.env.HTTP_RATE_LIMIT_AUTH || 30);
+const HTTP_RATE_LIMIT_FEEDBACK = Number(process.env.HTTP_RATE_LIMIT_FEEDBACK || 12);
+const HTTP_RATE_LIMIT_FRIENDS = Number(process.env.HTTP_RATE_LIMIT_FRIENDS || 60);
+const HTTP_RATE_LIMIT_SCORES = Number(process.env.HTTP_RATE_LIMIT_SCORES || 60);
+const SOCKET_RATE_WINDOW_MS = Number(process.env.SOCKET_RATE_WINDOW_MS || 1_000);
+const SOCKET_RATE_LIMIT_GAME_STATE = Number(process.env.SOCKET_RATE_LIMIT_GAME_STATE || 90);
+const SOCKET_RATE_LIMIT_GAME_INPUT = Number(process.env.SOCKET_RATE_LIMIT_GAME_INPUT || 120);
+const SOCKET_RATE_LIMIT_GAME_EVENT = Number(process.env.SOCKET_RATE_LIMIT_GAME_EVENT || 90);
+const SOCKET_RATE_LIMIT_SIGNAL = Number(process.env.SOCKET_RATE_LIMIT_SIGNAL || 180);
+const SOCKET_RATE_LIMIT_PING = Number(process.env.SOCKET_RATE_LIMIT_PING || 20);
+const SOCKET_RATE_LIMIT_ROOM = Number(process.env.SOCKET_RATE_LIMIT_ROOM || 20);
 
 const METRICS_SAMPLE_LIMIT = 250;
 
@@ -62,6 +76,9 @@ const serverMetrics = {
   lastRoomJoinAt: null,
   lastRoomStartAt: null,
   latencyReports: [],
+  httpRateLimited: 0,
+  socketRateLimited: 0,
+  socketPayloadRejected: 0,
 };
 
 function trackMetricBytes(field, payload) {
@@ -128,6 +145,105 @@ function roomMetricsSummary() {
   return summary;
 }
 
+const httpRateBuckets = new Map();
+const socketRateBuckets = new Map();
+
+function getClientIp(req) {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (Array.isArray(forwardedFor)) return String(forwardedFor[0] || '');
+  return String(forwardedFor || req.socket.remoteAddress || req.ip || 'unknown');
+}
+
+function allowRate(bucketMap, key, limit, windowMs) {
+  const now = Date.now();
+  let bucket = bucketMap.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + windowMs };
+    bucketMap.set(key, bucket);
+  }
+  bucket.count++;
+  return {
+    ok: bucket.count <= limit,
+    remaining: Math.max(0, limit - bucket.count),
+    resetAt: bucket.resetAt,
+    count: bucket.count,
+  };
+}
+
+function makeHttpRateLimiter(limit, windowMs = HTTP_RATE_WINDOW_MS) {
+  return (req, res, next) => {
+    const key = `${req.path}:${getClientIp(req)}`;
+    const rate = allowRate(httpRateBuckets, key, limit, windowMs);
+    res.setHeader('X-RateLimit-Limit', String(limit));
+    res.setHeader('X-RateLimit-Remaining', String(rate.remaining));
+    res.setHeader('X-RateLimit-Reset', String(rate.resetAt));
+    if (!rate.ok) {
+      serverMetrics.httpRateLimited++;
+      return res.status(429).json({ ok: false, reason: 'Too many requests, slow down.' });
+    }
+    next();
+  };
+}
+
+function allowSocketRate(socket, eventName, limit, windowMs = SOCKET_RATE_WINDOW_MS) {
+  const key = `${socket.id}:${eventName}`;
+  const rate = allowRate(socketRateBuckets, key, limit, windowMs);
+  if (!rate.ok) {
+    serverMetrics.socketRateLimited++;
+    if (rate.count === limit + 1) {
+      socket.emit('server:warning', { type: 'rate_limit', event: eventName, limit, windowMs });
+    }
+  }
+  return rate.ok;
+}
+
+function rejectBadPayload(socket, reason) {
+  serverMetrics.socketPayloadRejected++;
+  socket.emit('server:warning', { type: 'payload_rejected', reason });
+}
+
+function isFiniteNumber(v) {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function validateGameInputPayload(payload) {
+  if (!payload || typeof payload !== 'object') return { ok: false, reason: 'Missing payload' };
+  const boolFields = ['left', 'right', 'jump', 'alive', 'gravityFlipped'];
+  for (const field of boolFields) {
+    if (typeof payload[field] !== 'boolean') return { ok: false, reason: `Invalid ${field}` };
+  }
+  if (!isFiniteNumber(payload.x) || !isFiniteNumber(payload.y)) return { ok: false, reason: 'Invalid position' };
+  if (!isFiniteNumber(payload.vx) || !isFiniteNumber(payload.vy)) return { ok: false, reason: 'Invalid velocity' };
+  if (!isFiniteNumber(payload.facing) || !isFiniteNumber(payload.animFrame) || !isFiniteNumber(payload.ts)) {
+    return { ok: false, reason: 'Invalid input metadata' };
+  }
+  if (Math.abs(payload.vx) > 20 || Math.abs(payload.vy) > 30) return { ok: false, reason: 'Velocity out of bounds' };
+  if (payload.x < -500 || payload.x > 10000 || payload.y < -1000 || payload.y > 5000) {
+    return { ok: false, reason: 'Position out of bounds' };
+  }
+  return { ok: true };
+}
+
+function validateGameStatePayload(payload) {
+  if (!payload || typeof payload !== 'object') return { ok: false, reason: 'Missing payload' };
+  if (!Array.isArray(payload.players) || payload.players.length > MAX_PLAYERS) {
+    return { ok: false, reason: 'Invalid player state list' };
+  }
+  if (payload.traps && (!Array.isArray(payload.traps) || payload.traps.length > 256)) {
+    return { ok: false, reason: 'Invalid trap state list' };
+  }
+  if (payload.platforms && (!Array.isArray(payload.platforms) || payload.platforms.length > 256)) {
+    return { ok: false, reason: 'Invalid platform state list' };
+  }
+  return { ok: true };
+}
+
+function validateGameEventPayload(payload) {
+  if (!payload || typeof payload !== 'object') return { ok: false, reason: 'Missing payload' };
+  if (typeof payload.type !== 'string' || payload.type.length > 64) return { ok: false, reason: 'Invalid event type' };
+  return { ok: true };
+}
+
 // ─── SCORING CONSTANTS ────────────────────────
 // Score = BASE - death_penalty - time_penalty
 // death_penalty: 0 deaths=0, 1=50, 2=100, 3=180, 4=280, 5=400, 6=540, 7+=700
@@ -158,8 +274,6 @@ const UserSchema = new mongoose.Schema({
   createdAt:    { type: Date,   default: Date.now },
   lastLoginAt:  { type: Date,   default: Date.now },
 });
-UserSchema.index({ username: 1 });
-UserSchema.index({ email: 1 });
 
 // One doc per (user × level) — stores BEST score only.
 // When a new run finishes, we compare and only update if it improves.
@@ -338,7 +452,7 @@ app.use(express.static(path.join(__dirname)));
 // ════════════════════════════════════════════════
 
 // POST /api/auth/register
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', makeHttpRateLimiter(HTTP_RATE_LIMIT_AUTH), async (req, res) => {
   if (!dbConnected) return res.json({ ok: false, reason: 'Database not connected' });
 
   const { username, email, password } = req.body;
@@ -377,7 +491,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // POST /api/auth/login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', makeHttpRateLimiter(HTTP_RATE_LIMIT_AUTH), async (req, res) => {
   if (!dbConnected) return res.json({ ok: false, reason: 'Database not connected' });
 
   const { username, password } = req.body;
@@ -425,7 +539,7 @@ app.get('/api/auth/me', optionalAuth, (req, res) => {
 });
 
 // POST /api/auth/logout
-app.post('/api/auth/logout', optionalAuth, (req, res) => {
+app.post('/api/auth/logout', makeHttpRateLimiter(HTTP_RATE_LIMIT_DEFAULT), optionalAuth, (req, res) => {
   res.clearCookie('ld_token', {
     httpOnly: true,
     sameSite: 'lax',
@@ -438,7 +552,7 @@ app.post('/api/auth/logout', optionalAuth, (req, res) => {
 });
 
 // POST /api/feedback
-app.post('/api/feedback', optionalAuth, async (req, res) => {
+app.post('/api/feedback', makeHttpRateLimiter(HTTP_RATE_LIMIT_FEEDBACK), optionalAuth, async (req, res) => {
   if (!dbConnected || !Feedback) {
     return res.status(503).json({ ok: false, reason: 'Database not connected' });
   }
@@ -499,7 +613,7 @@ app.post('/api/feedback', optionalAuth, async (req, res) => {
 });
 
 // GET /api/friends
-app.get('/api/friends', requireAuth, async (req, res) => {
+app.get('/api/friends', makeHttpRateLimiter(HTTP_RATE_LIMIT_FRIENDS), requireAuth, async (req, res) => {
   if (!dbConnected || !FriendLink || !FriendRequest) {
     return res.status(503).json({ ok: false, reason: 'Database not connected', friends: [], incoming: [], outgoing: [], invites: [] });
   }
@@ -536,7 +650,7 @@ app.get('/api/friends', requireAuth, async (req, res) => {
 });
 
 // POST /api/friends/request
-app.post('/api/friends/request', requireAuth, async (req, res) => {
+app.post('/api/friends/request', makeHttpRateLimiter(HTTP_RATE_LIMIT_FRIENDS), requireAuth, async (req, res) => {
   if (!dbConnected || !FriendLink || !FriendRequest) {
     return res.status(503).json({ ok: false, reason: 'Database not connected' });
   }
@@ -577,7 +691,7 @@ app.post('/api/friends/request', requireAuth, async (req, res) => {
 });
 
 // POST /api/friends/respond
-app.post('/api/friends/respond', requireAuth, async (req, res) => {
+app.post('/api/friends/respond', makeHttpRateLimiter(HTTP_RATE_LIMIT_FRIENDS), requireAuth, async (req, res) => {
   if (!dbConnected || !FriendLink || !FriendRequest) {
     return res.status(503).json({ ok: false, reason: 'Database not connected' });
   }
@@ -613,7 +727,7 @@ app.post('/api/friends/respond', requireAuth, async (req, res) => {
 });
 
 // POST /api/friends/invite
-app.post('/api/friends/invite', requireAuth, async (req, res) => {
+app.post('/api/friends/invite', makeHttpRateLimiter(HTTP_RATE_LIMIT_FRIENDS), requireAuth, async (req, res) => {
   if (!dbConnected || !FriendLink) {
     return res.status(503).json({ ok: false, reason: 'Database not connected' });
   }
@@ -642,7 +756,7 @@ app.post('/api/friends/invite', requireAuth, async (req, res) => {
 
 // POST /api/scores — submit a level completion
 // Body: { levelId, deaths, timeSec }
-app.post('/api/scores', requireAuth, async (req, res) => {
+app.post('/api/scores', makeHttpRateLimiter(HTTP_RATE_LIMIT_SCORES), requireAuth, async (req, res) => {
   if (!dbConnected) return res.json({ ok: false, reason: 'Database not connected' });
 
   const { levelId, deaths, timeSec } = req.body;
@@ -767,6 +881,10 @@ app.get('/health', (_, res) => {
 });
 
 app.get('/health/metrics', (_, res) => {
+  const providedKey = String(_.headers['x-metrics-key'] || _.query.key || '');
+  if (METRICS_KEY && providedKey !== METRICS_KEY) {
+    return res.status(403).json({ ok: false, reason: 'Forbidden' });
+  }
   res.json({
     ok: true,
     db: dbConnected,
@@ -797,6 +915,9 @@ app.get('/health/metrics', (_, res) => {
       p2pSignals: serverMetrics.p2pSignals,
       avgGameStateBytes: serverMetrics.gameStateRelays ? Math.round(serverMetrics.gameStateBytes / serverMetrics.gameStateRelays) : 0,
       avgGameInputBytes: serverMetrics.gameInputRelays ? Math.round(serverMetrics.gameInputBytes / serverMetrics.gameInputRelays) : 0,
+      httpRateLimited: serverMetrics.httpRateLimited,
+      socketRateLimited: serverMetrics.socketRateLimited,
+      socketPayloadRejected: serverMetrics.socketPayloadRejected,
       lastRoomCreateAt: serverMetrics.lastRoomCreateAt,
       lastRoomJoinAt: serverMetrics.lastRoomJoinAt,
       lastRoomStartAt: serverMetrics.lastRoomStartAt,
@@ -898,6 +1019,9 @@ io.on('connection', socket => {
   console.log(`[+] ${socket.id} via ${socket.conn.transport.name} | rooms=${rooms.size}`);
 
   socket.on('room:create', ({ name, mode }, ack) => {
+    if (!allowSocketRate(socket, 'room:create', SOCKET_RATE_LIMIT_ROOM, 10_000)) {
+      return ack && ack({ ok: false, reason: 'Too many room create attempts' });
+    }
     const code = genRoomCode();
     const roomMode = sanitizeRoomMode(mode);
     const room = {
@@ -927,6 +1051,9 @@ io.on('connection', socket => {
   });
 
   socket.on('room:join', ({ code, name, mode }, ack) => {
+    if (!allowSocketRate(socket, 'room:join', SOCKET_RATE_LIMIT_ROOM, 10_000)) {
+      return ack && ack({ ok: false, reason: 'Too many room join attempts' });
+    }
     const room = rooms.get(code?.toUpperCase());
     if (!room)                            return ack({ ok: false, reason: 'Room not found' });
     if (room.state !== 'lobby')           return ack({ ok: false, reason: 'Game already started' });
@@ -948,6 +1075,9 @@ io.on('connection', socket => {
   socket.on('room:leave',  () => handleLeave(socket));
 
   socket.on('room:team', ({ team }, ack) => {
+    if (!allowSocketRate(socket, 'room:team', SOCKET_RATE_LIMIT_ROOM, 5_000)) {
+      return ack && ack({ ok: false, reason: 'Too many team changes' });
+    }
     const room = getRoomBySocket(socket.id);
     const player = room?.players.get(socket.id);
     if (!room || !player) return ack && ack({ ok: false, reason: 'Room not found' });
@@ -958,6 +1088,9 @@ io.on('connection', socket => {
   });
 
   socket.on('room:start', ({ levelOrder, mpOnlyMode, ropeEnabled }, ack) => {
+    if (!allowSocketRate(socket, 'room:start', SOCKET_RATE_LIMIT_ROOM, 10_000)) {
+      return ack && ack({ ok: false, reason: 'Too many start attempts' });
+    }
     const room = getRoomBySocket(socket.id);
     if (!room || room.hostSocketId !== socket.id) return ack && ack({ ok: false });
     if (sanitizeRoomMode(room.mode) === 'pvp') {
@@ -979,17 +1112,44 @@ io.on('connection', socket => {
     ack && ack({ ok: true });
   });
 
-  socket.on('voice:offer',  ({ to, offer })     => { serverMetrics.voiceSignals++; io.to(to).emit('voice:offer',  { from: socket.id, offer }); });
-  socket.on('voice:answer', ({ to, answer })    => { serverMetrics.voiceSignals++; io.to(to).emit('voice:answer', { from: socket.id, answer }); });
-  socket.on('voice:ice',    ({ to, candidate }) => { serverMetrics.voiceSignals++; io.to(to).emit('voice:ice',    { from: socket.id, candidate }); });
-  socket.on('p2p:offer',   ({ to, offer })      => { serverMetrics.p2pSignals++; io.to(to).emit('p2p:offer',   { from: socket.id, offer }); });
-  socket.on('p2p:answer',  ({ to, answer })     => { serverMetrics.p2pSignals++; io.to(to).emit('p2p:answer',  { from: socket.id, answer }); });
-  socket.on('p2p:ice',     ({ to, candidate })  => { serverMetrics.p2pSignals++; io.to(to).emit('p2p:ice',     { from: socket.id, candidate }); });
+  socket.on('voice:offer',  ({ to, offer })     => {
+    if (!allowSocketRate(socket, 'voice:offer', SOCKET_RATE_LIMIT_SIGNAL)) return;
+    serverMetrics.voiceSignals++;
+    io.to(to).emit('voice:offer',  { from: socket.id, offer });
+  });
+  socket.on('voice:answer', ({ to, answer })    => {
+    if (!allowSocketRate(socket, 'voice:answer', SOCKET_RATE_LIMIT_SIGNAL)) return;
+    serverMetrics.voiceSignals++;
+    io.to(to).emit('voice:answer', { from: socket.id, answer });
+  });
+  socket.on('voice:ice',    ({ to, candidate }) => {
+    if (!allowSocketRate(socket, 'voice:ice', SOCKET_RATE_LIMIT_SIGNAL * 2)) return;
+    serverMetrics.voiceSignals++;
+    io.to(to).emit('voice:ice',    { from: socket.id, candidate });
+  });
+  socket.on('p2p:offer',   ({ to, offer })      => {
+    if (!allowSocketRate(socket, 'p2p:offer', SOCKET_RATE_LIMIT_SIGNAL)) return;
+    serverMetrics.p2pSignals++;
+    io.to(to).emit('p2p:offer',   { from: socket.id, offer });
+  });
+  socket.on('p2p:answer',  ({ to, answer })     => {
+    if (!allowSocketRate(socket, 'p2p:answer', SOCKET_RATE_LIMIT_SIGNAL)) return;
+    serverMetrics.p2pSignals++;
+    io.to(to).emit('p2p:answer',  { from: socket.id, answer });
+  });
+  socket.on('p2p:ice',     ({ to, candidate })  => {
+    if (!allowSocketRate(socket, 'p2p:ice', SOCKET_RATE_LIMIT_SIGNAL * 2)) return;
+    serverMetrics.p2pSignals++;
+    io.to(to).emit('p2p:ice',     { from: socket.id, candidate });
+  });
 
   let _relayCount = 0;
   socket.on('game:state', (payload) => {
+    if (!allowSocketRate(socket, 'game:state', SOCKET_RATE_LIMIT_GAME_STATE)) return;
     const room = getRoomBySocket(socket.id);
     if (!room || room.hostSocketId !== socket.id) return;
+    const validation = validateGameStatePayload(payload);
+    if (!validation.ok) return rejectBadPayload(socket, validation.reason);
     room._stateSeq = (room._stateSeq + 1) & 0xFFFF;
     serverMetrics.gameStateRelays++;
     trackMetricBytes('gameStateBytes', payload);
@@ -998,21 +1158,28 @@ io.on('connection', socket => {
   });
 
   socket.on('game:input',        (payload) => {
+    if (!allowSocketRate(socket, 'game:input', SOCKET_RATE_LIMIT_GAME_INPUT)) return;
     const r = getRoomBySocket(socket.id);
     if (r) {
+      const validation = validateGameInputPayload(payload);
+      if (!validation.ok) return rejectBadPayload(socket, validation.reason);
       serverMetrics.gameInputRelays++;
       trackMetricBytes('gameInputBytes', payload);
       io.to(r.hostSocketId).emit('game:input', { ...payload, fromSocketId: socket.id });
     }
   });
   socket.on('game:event',        (payload) => {
+    if (!allowSocketRate(socket, 'game:event', SOCKET_RATE_LIMIT_GAME_EVENT)) return;
     const r = getRoomBySocket(socket.id);
     if (r) {
+      const validation = validateGameEventPayload(payload);
+      if (!validation.ok) return rejectBadPayload(socket, validation.reason);
       serverMetrics.gameEventRelays++;
       io.to(r.code).emit('game:event', { ...payload, fromSocketId: socket.id });
     }
   });
   socket.on('game:request_sync', ()        => {
+    if (!allowSocketRate(socket, 'game:request_sync', SOCKET_RATE_LIMIT_PING)) return;
     const r = getRoomBySocket(socket.id);
     if (r) {
       serverMetrics.syncRequests++;
@@ -1020,10 +1187,12 @@ io.on('connection', socket => {
     }
   });
   socket.on('ping:req',          ({ ts })  => {
+    if (!allowSocketRate(socket, 'ping:req', SOCKET_RATE_LIMIT_PING)) return;
     serverMetrics.pingRequests++;
     socket.emit('ping:res', { ts });
   });
   socket.on('telemetry:net',     (payload) => {
+    if (!allowSocketRate(socket, 'telemetry:net', 6, 10_000)) return;
     const room = getRoomBySocket(socket.id);
     addLatencyReport({
       socketId: socket.id,
